@@ -187,6 +187,59 @@ const DATA = {
 const gameIndex = {};
 Object.keys(DATA).forEach(sport => DATA[sport].forEach(g => gameIndex[g.id] = { sport, game: g }));
 
+// ---------- live score checking (ESPN public scoreboard) ----------
+const ESPN_PATHS = {
+  nfl: { sport: 'football', league: 'nfl' },
+  mlb: { sport: 'baseball', league: 'mlb' },
+  ncaaf: { sport: 'football', league: 'college-football' },
+};
+function normTeam(name) { return (name || '').toLowerCase().replace(/[^a-z]/g, ''); }
+function teamsMatch(a, b) {
+  const na = normTeam(a), nb = normTeam(b);
+  if (!na || !nb || na.length < 4 || nb.length < 4) return false;
+  return na.includes(nb) || nb.includes(na);
+}
+async function refreshLiveScores() {
+  for (const sport of Object.keys(ESPN_PATHS)) {
+    const meta = LEAGUES_META.find(l => l.id === sport);
+    if (!meta || !meta.active) continue;
+    const { sport: espnSport, league } = ESPN_PATHS[sport];
+    try {
+      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${league}/scoreboard`);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const events = json.events || [];
+      (DATA[sport] || []).forEach(g => {
+        const homeName = g.teams[g.home]?.name, awayName = g.teams[g.away]?.name;
+        const match = events.find(ev => {
+          const comp = ev.competitions?.[0];
+          const home = comp?.competitors?.find(c => c.homeAway === 'home');
+          const away = comp?.competitors?.find(c => c.homeAway === 'away');
+          return home && away && teamsMatch(home.team?.displayName, homeName) && teamsMatch(away.team?.displayName, awayName);
+        });
+        if (!match) return;
+        const comp = match.competitions[0];
+        const state = match.status?.type?.state;
+        const home = comp.competitors.find(c => c.homeAway === 'home');
+        const away = comp.competitors.find(c => c.homeAway === 'away');
+        if (state === 'post') { g.status = 'closed'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; }
+        else if (state === 'in') { g.status = 'inprogress'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; }
+        else { g.status = 'scheduled'; }
+      });
+    } catch (e) { /* live check best-effort; ignore failures for this sport */ }
+  }
+}
+
+let liveTimer = null;
+function startLiveScoreChecks() {
+  refreshLiveScores().then(() => { if (profile) render(); });
+  if (liveTimer) return;
+  liveTimer = setInterval(async () => {
+    await refreshLiveScores();
+    if (profile) render();
+  }, 60000);
+}
+
 let profile = null;
 let allPicks = [];
 let players = [];
@@ -377,6 +430,7 @@ function renderSetup() {
       players = g.players; allPicks = g.picks;
       if (!players.includes(name)) { players.push(name); await savePlayers(players); }
       startPolling();
+      startLiveScoreChecks();
       activeTab = 'games';
       render();
     } catch (e) {
@@ -413,7 +467,7 @@ function renderGames() {
     return wrap;
   }
 
-  const games = (DATA[activeSport] || []).filter(g => new Date(g.start) > NOW && g.status === 'scheduled');
+  const games = (DATA[activeSport] || []).filter(g => new Date(g.start) > new Date() && g.status === 'scheduled');
   const list = el('div');
   if (!games.length) {
     list.appendChild(el('div', 'empty', 'No upcoming ' + meta.label + ' games in this snapshot right now.'));
@@ -421,7 +475,7 @@ function renderGames() {
     games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
   }
   wrap.appendChild(list);
-  wrap.appendChild(el('div', 'refresh-note', 'Snapshot from ' + SNAPSHOT_TIME + ' — only games that hadn\'t started yet at that time are shown. Spreads and odds are modeled from win-probability data, not live sportsbook lines. Ask Claude to "refresh Wager Wire" for current games and to settle finished picks.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Game list is a snapshot from ' + SNAPSHOT_TIME + ' (spreads are modeled from win-probability data, not live sportsbook lines), but scores and final results are checked live from ESPN and update automatically as games finish.'));
   return wrap;
 }
 
@@ -642,7 +696,7 @@ function renderLeaderboard() {
     row.appendChild(el('div', 'lb-profit ' + (r.profit > 0 ? 'pos' : r.profit < 0 ? 'neg' : ''), fmtUnits(r.profit)));
     wrap.appendChild(row);
   });
-  wrap.appendChild(el('div', 'refresh-note', 'Payouts are flat 1:1 — win a pick, gain the units risked; lose it, drop the same amount. Ask Claude to refresh for the latest results.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Payouts are flat 1:1 — win a pick, gain the units risked; lose it, drop the same amount. Scores are checked live from ESPN, so standings update automatically as games finish.'));
   return wrap;
 }
 
@@ -654,6 +708,7 @@ function renderLeaderboard() {
       players = g.players; allPicks = g.picks;
       if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
       startPolling();
+      startLiveScoreChecks();
     } catch (e) {
       setupError = "Had trouble connecting to the shared board (" + describeFetchError(e) + ") — you can still continue.";
     }
