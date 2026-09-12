@@ -116,6 +116,12 @@
   .lb-profit.neg { color: var(--danger); }
 
   .empty { text-align: center; padding: 50px 20px; color: var(--text-faint); font-size: 14px; }
+  .stats-table { width: 100%; border-collapse: collapse; margin-top: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .stats-table th { text-align: left; font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .stats-table td { padding: 9px 10px; font-size: 13px; font-family: var(--font-mono); border-bottom: 1px solid var(--border); color: var(--text); }
+  .stats-table tr:last-child td { border-bottom: none; }
+  .stats-table td.pos { color: var(--accent); }
+  .stats-table td.neg { color: var(--danger); }
   .refresh-note { margin: 16px 0 0; padding: 11px 13px; background: var(--surface); border-radius: 8px; font-size: 11px; color: var(--text-faint); line-height: 1.5; border-left: 2px solid var(--accent-dark); border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 </style>
 </head>
@@ -391,6 +397,7 @@ function render() {
   if (!profile) { main.appendChild(renderSetup()); return; }
   if (activeTab === 'games') main.appendChild(renderGames());
   else if (activeTab === 'picks') main.appendChild(renderMyPicks());
+  else if (activeTab === 'stats') main.appendChild(renderStats());
   else if (activeTab === 'board') main.appendChild(renderLeaderboard());
   window.scrollTo(0, scrollY);
 }
@@ -399,7 +406,7 @@ function renderTabs() {
   const bar = document.getElementById('tabbar');
   bar.innerHTML = '';
   if (!profile) return;
-  [['games','Games'],['picks','My Bets'],['board','Leaderboard']].forEach(([id,label]) => {
+  [['games','Games'],['picks','My Bets'],['stats','Stats'],['board','Leaderboard']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (activeTab === id ? ' active' : ''), label);
     t.onclick = () => { activeTab = id; render(); };
     bar.appendChild(t);
@@ -632,7 +639,7 @@ function rankAmong(valueForName) {
 
 function renderMyPicks() {
   const wrap = el('div');
-  const mine = allPicks.filter(p => p.player === profile.name).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const mine = allPicks.filter(p => p.player === profile.name);
 
   const curRank = rankAmong(n => n === profile.name ? currentProfit(n) : currentProfit(n));
   const potRank = rankAmong(n => n === profile.name ? potentialProfit(n) : currentProfit(n));
@@ -653,27 +660,178 @@ function renderMyPicks() {
     wrap.appendChild(el('div', 'empty', 'No picks yet — head to Games and lock one in.'));
     return wrap;
   }
-  const byWeek = {};
-  mine.forEach(p => { (byWeek[p.week] = byWeek[p.week] || []).push(p); });
-  Object.keys(byWeek).sort().reverse().forEach(wk => {
-    wrap.appendChild(el('div', 'week-header', byWeek[wk][0].weekLabel));
-    byWeek[wk].forEach(p => {
-      const r = settlePick(p);
-      const row = el('div', 'pick-row');
-      const left = el('div');
-      const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || p.sport.toUpperCase();
-      left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}`));
-      left.appendChild(el('div', 'detail', `${p.sideAbbr} · ${p.units}u risked`));
-      row.appendChild(left);
-      let resultHtml = '', cls = 'pending';
-      if (r.status === 'win') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Won</span>'; cls = 'win'; }
-      else if (r.status === 'loss') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Lost</span>'; cls = 'loss'; }
-      else if (r.status === 'push') { resultHtml = 'Push<span class="sub">Refunded</span>'; cls = 'pending'; }
-      else { resultHtml = fmtUnits(potentialWin(p)) + '<span class="sub">If it hits</span>'; cls = 'pending'; }
-      row.appendChild(el('div', 'result ' + cls, resultHtml));
-      wrap.appendChild(row);
-    });
+
+  function gameStatusFor(p) {
+    const idx = gameIndex[p.gameId];
+    return idx ? idx.game.status : 'scheduled';
+  }
+  const groups = { active: [], future: [], past: [] };
+  mine.forEach(p => {
+    const st = gameStatusFor(p);
+    if (st === 'inprogress') groups.active.push(p);
+    else if (st === 'closed' || st === 'complete') groups.past.push(p);
+    else groups.future.push(p);
   });
+  groups.active.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+  groups.future.sort((a,b) => {
+    const ga = gameIndex[a.gameId], gb = gameIndex[b.gameId];
+    return (ga ? new Date(ga.game.start) : 0) - (gb ? new Date(gb.game.start) : 0);
+  });
+  groups.past.sort((a,b) => {
+    const ga = gameIndex[a.gameId], gb = gameIndex[b.gameId];
+    return (gb ? new Date(gb.game.start) : 0) - (ga ? new Date(ga.game.start) : 0);
+  });
+
+  [['active','Active'], ['future','Upcoming'], ['past','Settled']].forEach(([key,label]) => {
+    const list = groups[key];
+    wrap.appendChild(el('div', 'week-header', label + ' (' + list.length + ')'));
+    if (!list.length) {
+      wrap.appendChild(el('div', 'empty', 'Nothing here yet.'));
+    } else {
+      list.forEach(p => wrap.appendChild(renderPickRow(p)));
+    }
+  });
+  return wrap;
+}
+
+function renderPickRow(p) {
+  const r = settlePick(p);
+  const row = el('div', 'pick-row');
+  const left = el('div');
+  const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || p.sport.toUpperCase();
+  left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}`));
+  left.appendChild(el('div', 'detail', `${p.sideAbbr} · ${p.units}u risked`));
+  row.appendChild(left);
+  let resultHtml = '', cls = 'pending';
+  if (r.status === 'win') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Won</span>'; cls = 'win'; }
+  else if (r.status === 'loss') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Lost</span>'; cls = 'loss'; }
+  else if (r.status === 'push') { resultHtml = 'Push<span class="sub">Refunded</span>'; cls = 'pending'; }
+  else { resultHtml = fmtUnits(potentialWin(p)) + '<span class="sub">If it hits</span>'; cls = 'pending'; }
+  row.appendChild(el('div', 'result ' + cls, resultHtml));
+  return row;
+}
+
+// ---------- stats analytics ----------
+function settledPicksSorted(name) {
+  return allPicks.filter(p => p.player === name)
+    .map(p => ({ p, r: settlePick(p), start: gameIndex[p.gameId] ? new Date(gameIndex[p.gameId].game.start) : new Date(p.timestamp) }))
+    .filter(x => x.r.status === 'win' || x.r.status === 'loss')
+    .sort((a, b) => a.start - b.start);
+}
+function recordFor(entries) {
+  let w = 0, l = 0, net = 0;
+  entries.forEach(x => { if (x.r.status === 'win') { w++; net += x.r.profit; } else { l++; net += x.r.profit; } });
+  const total = w + l;
+  return { w, l, total, winPct: total ? (w / total) * 100 : 0, net };
+}
+function winPctTrendSVG(entries) {
+  if (!entries.length) return '<div class="empty" style="padding:24px 10px;">No settled bets yet.</div>';
+  const w = 320, h = 130, padL = 30, padR = 8, padT = 10, padB = 18;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  let wins = 0;
+  const pts = entries.map((x, i) => { if (x.r.status === 'win') wins++; return { x: i, y: (wins / (i + 1)) * 100 }; });
+  const n = pts.length;
+  const xScale = i => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const yScale = pct => padT + innerH - (pct / 100) * innerH;
+  const d = pts.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i).toFixed(1)} ${yScale(pt.y).toFixed(1)}`).join(' ');
+  const y50 = padT + innerH / 2;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}" style="stroke:var(--border)" stroke-width="1"/>
+    <line x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}" style="stroke:var(--border)" stroke-width="1"/>
+    <line x1="${padL}" y1="${y50}" x2="${padL + innerW}" y2="${y50}" style="stroke:var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="2" y="${padT + 6}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">100</text>
+    <text x="6" y="${y50 + 3}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">50</text>
+    <text x="10" y="${padT + innerH + 3}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">0</text>
+    <path d="${d}" fill="none" style="stroke:var(--accent)" stroke-width="2"/>
+  </svg>`;
+}
+function leagueBarsSVG(rows) {
+  if (!rows.length) return '<div class="empty" style="padding:24px 10px;">No settled bets yet.</div>';
+  const w = 320, rowH = 26, h = rows.length * rowH + 8;
+  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.net)));
+  const mid = w / 2, halfTrack = w / 2 - 56;
+  let bars = '';
+  rows.forEach((r, i) => {
+    const y = 6 + i * rowH;
+    const barW = (Math.abs(r.net) / maxAbs) * halfTrack;
+    const x = r.net >= 0 ? mid : mid - barW;
+    const color = r.net > 0 ? 'var(--accent)' : (r.net < 0 ? 'var(--danger)' : 'var(--text-faint)');
+    bars += `<rect x="${x.toFixed(1)}" y="${y}" width="${barW.toFixed(1)}" height="14" rx="2" style="fill:${color}"/>`;
+    bars += `<text x="6" y="${y + 11}" font-size="10.5" style="fill:var(--text-dim)" font-family="var(--font-head)" font-weight="700">${r.label}</text>`;
+    bars += `<text x="${w - 6}" y="${y + 11}" font-size="10.5" text-anchor="end" style="fill:var(--text)" font-family="var(--font-mono)">${fmtUnits(r.net)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">
+    <line x1="${mid}" y1="0" x2="${mid}" y2="${h}" style="stroke:var(--border)"/>
+    ${bars}
+  </svg>`;
+}
+
+function renderStats() {
+  const wrap = el('div');
+  const entries = settledPicksSorted(profile.name);
+
+  if (!entries.length) {
+    wrap.appendChild(el('div', 'empty', 'No settled bets yet — stats will fill in once games finish.'));
+    return wrap;
+  }
+
+  const overall = recordFor(entries);
+  const overallBanner = el('div', 'rank-banner');
+  const oc1 = el('div', 'rank-cell');
+  oc1.appendChild(el('div', 'rc-label', 'Record'));
+  oc1.appendChild(el('div', 'rc-value', `${overall.w}-${overall.l}`));
+  oc1.appendChild(el('div', 'rc-sub', overall.winPct.toFixed(1) + '% win rate'));
+  overallBanner.appendChild(oc1);
+  const oc2 = el('div', 'rank-cell');
+  oc2.appendChild(el('div', 'rc-label', 'Net units'));
+  oc2.appendChild(el('div', 'rc-value ' + (overall.net > 0 ? 'accent' : ''), fmtUnits(overall.net)));
+  oc2.appendChild(el('div', 'rc-sub', overall.total + ' settled bets'));
+  overallBanner.appendChild(oc2);
+  wrap.appendChild(overallBanner);
+
+  wrap.appendChild(el('div', 'week-header', 'Win % over time'));
+  const trendCard = el('div', 'event-card');
+  trendCard.innerHTML = winPctTrendSVG(entries);
+  wrap.appendChild(trendCard);
+
+  wrap.appendChild(el('div', 'week-header', 'Rolling record'));
+  const rollWrap = el('div', 'rank-banner');
+  [10, 20, 50].forEach(n => {
+    const recentWindow = entries.slice(-n);
+    const rec = recordFor(recentWindow);
+    const cell = el('div', 'rank-cell');
+    cell.appendChild(el('div', 'rc-label', 'Last ' + n));
+    cell.appendChild(el('div', 'rc-value', recentWindow.length ? rec.winPct.toFixed(0) + '%' : '—'));
+    cell.appendChild(el('div', 'rc-sub', recentWindow.length ? `${rec.w}-${rec.l} · ${fmtUnits(rec.net)}` : 'not enough yet'));
+    rollWrap.appendChild(cell);
+  });
+  wrap.appendChild(rollWrap);
+
+  wrap.appendChild(el('div', 'week-header', 'By league'));
+  const byLeague = {};
+  entries.forEach(x => { (byLeague[x.p.sport] = byLeague[x.p.sport] || []).push(x); });
+  const leagueRows = Object.keys(byLeague).map(sport => {
+    const rec = recordFor(byLeague[sport]);
+    const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+    return { label, w: rec.w, l: rec.l, winPct: rec.winPct, net: rec.net };
+  }).sort((a, b) => b.net - a.net);
+
+  const table = el('table', 'stats-table');
+  table.innerHTML = `<thead><tr><th>League</th><th>Record</th><th>Win%</th><th>Net</th></tr></thead>`;
+  const tbody = el('tbody');
+  leagueRows.forEach(r => {
+    const tr = el('tr');
+    tr.innerHTML = `<td>${r.label}</td><td>${r.w}-${r.l}</td><td>${r.winPct.toFixed(0)}%</td><td class="${r.net > 0 ? 'pos' : r.net < 0 ? 'neg' : ''}">${fmtUnits(r.net)}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+
+  wrap.appendChild(el('div', 'week-header', 'Net units by league'));
+  const barsCard = el('div', 'event-card');
+  barsCard.innerHTML = leagueBarsSVG(leagueRows.map(r => ({ label: r.label, net: r.net })));
+  wrap.appendChild(barsCard);
+
   return wrap;
 }
 
