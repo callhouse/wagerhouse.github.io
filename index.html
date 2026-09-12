@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Wager Wire</title>
+<style>
+  :root {
+    --bg: #0A0C0D; --surface: #15181A; --surface-2: #1E2224; --border: #2A2F31;
+    --text: #F2F4F4; --text-dim: #8D9598; --text-faint: #5A6164;
+    --accent: #53E05B; --accent-dark: #0F2E12; --accent-text: #06210A;
+    --danger: #FF5C5C; --danger-dark: #3A1414;
+    --gold: #F2C94C;
+    --font-head: 'Helvetica Neue', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-head); -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
+  #app { min-height: 100vh; padding-bottom: 50px; }
+  input, button { font-family: var(--font-head); }
+
+  header.top { position: sticky; top: 0; z-index: 20; background: var(--bg); padding: 16px 16px 0; border-bottom: 1px solid var(--border); }
+  header.top .row1 { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  header.top h1 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: -0.01em; text-transform: uppercase; }
+  header.top h1 span { color: var(--accent); }
+  header.top .who { font-size: 12px; color: var(--text-dim); }
+
+  .tabbar { display: flex; gap: 4px; }
+  .tab { flex: 1; text-align: center; padding: 10px 4px; font-size: 12px; font-weight: 700; color: var(--text-faint); border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.02em; }
+  .tab.active { color: var(--accent); border-color: var(--accent); }
+
+  .league-scroller { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px 10px; scrollbar-width: none; }
+  .league-scroller::-webkit-scrollbar { display: none; }
+  .league-pill { flex: 0 0 auto; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); font-size: 12.5px; font-weight: 700; white-space: nowrap; text-transform: uppercase; }
+  .league-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .league-pill.off { opacity: 0.5; }
+
+  main { padding: 4px 16px 8px; }
+
+  .offseason-card { text-align: center; padding: 50px 20px; color: var(--text-dim); }
+  .offseason-card .big { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .offseason-card .small { font-size: 12.5px; }
+
+  .event-card { background: var(--surface); border-radius: 10px; padding: 12px; margin-top: 10px; border: 1px solid var(--border); }
+  .event-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .event-meta { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+  .event-meta.live { color: var(--danger); font-weight: 700; }
+
+  .team-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+  .team-name { font-size: 14.5px; font-weight: 700; }
+  .team-score { font-family: var(--font-mono); font-size: 15px; font-weight: 700; min-width: 24px; text-align: right; }
+  .team-row.winner .team-name { color: var(--accent); }
+  .team-row.loser .team-name { color: var(--text-dim); }
+
+  .outcome-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .outcome-btn { border: 1px solid var(--border); background: var(--surface-2); border-radius: 8px; padding: 8px 6px; text-align: center; color: var(--text); }
+  .outcome-btn .oc-team { font-size: 11.5px; font-weight: 700; color: var(--text-dim); margin-bottom: 3px; }
+  .outcome-btn .oc-line { font-family: var(--font-mono); font-size: 15px; font-weight: 700; }
+  .outcome-btn .oc-odds { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+  .outcome-btn.selected { background: var(--accent); border-color: var(--accent); }
+  .outcome-btn.selected .oc-team, .outcome-btn.selected .oc-line, .outcome-btn.selected .oc-odds { color: var(--accent-text); }
+  .outcome-btn.disabled { opacity: 0.45; }
+
+  .bet-slip { margin-top: 10px; background: var(--surface-2); border-radius: 8px; padding: 10px; }
+  .bs-row { display: flex; align-items: center; gap: 8px; }
+  .bs-row label { font-size: 11.5px; color: var(--text-dim); font-weight: 600; }
+  .bs-row input { width: 58px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 7px 8px; font-family: var(--font-mono); font-size: 14px; }
+  .bs-row .to-win { flex: 1; text-align: right; font-family: var(--font-mono); font-size: 13px; color: var(--accent); }
+  .bs-row .to-win .lbl { color: var(--text-faint); font-family: var(--font-head); font-size: 10.5px; display: block; text-transform: uppercase; }
+  .lock-btn { width: 100%; margin-top: 9px; background: var(--accent); border: none; color: var(--accent-text); border-radius: 6px; padding: 10px; font-size: 13.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em; }
+  .lock-btn:disabled { opacity: 0.35; }
+  .pick-error { color: var(--danger); font-size: 11px; margin-top: 6px; }
+
+  .locked-note { margin-top: 10px; background: var(--accent-dark); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; font-size: 12.5px; color: var(--accent); }
+  .locked-note .ln-title { font-weight: 700; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.03em; margin-bottom: 3px; color: var(--text-dim); }
+  .locked-note b { font-family: var(--font-mono); }
+  .no-odds-note { margin-top: 8px; font-size: 11.5px; color: var(--text-faint); font-style: italic; }
+
+  .setup-card { background: var(--surface); border-radius: 10px; padding: 16px; margin-top: 8px; border: 1px solid var(--border); }
+  .setup-card label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; margin-top: 12px; }
+  .setup-card label:first-child { margin-top: 0; }
+  .setup-card input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 9px 10px; font-size: 14px; }
+  .setup-card .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+  .setup-card button { flex: 1; padding: 10px; border-radius: 6px; font-size: 13.5px; font-weight: 800; border: none; background: var(--accent); color: var(--accent-text); text-transform: uppercase; }
+  .setup-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 10px; line-height: 1.5; }
+
+  .rank-banner { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+  .rank-cell { flex: 1; padding: 12px; text-align: center; }
+  .rank-cell + .rank-cell { border-left: 1px solid var(--border); }
+  .rank-cell .rc-label { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px; }
+  .rank-cell .rc-value { font-family: var(--font-mono); font-size: 20px; font-weight: 800; color: var(--text); }
+  .rank-cell .rc-value.accent { color: var(--accent); }
+  .rank-cell .rc-sub { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
+
+  .pick-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); background: var(--surface); border-radius: 8px; margin-top: 8px; border: 1px solid var(--border); }
+  .pick-row .who { font-size: 13.5px; font-weight: 700; }
+  .pick-row .detail { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; font-family: var(--font-mono); }
+  .pick-row .result { font-family: var(--font-mono); font-size: 15px; font-weight: 800; text-align: right; }
+  .pick-row .result .sub { display: block; font-size: 9.5px; color: var(--text-faint); font-weight: 500; text-transform: uppercase; font-family: var(--font-head); }
+  .result.win { color: var(--accent); }
+  .result.loss { color: var(--danger); }
+  .result.pending { color: var(--gold); }
+
+  .week-header { font-size: 12.5px; font-weight: 800; color: var(--text-dim); margin: 18px 0 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .week-header:first-child { margin-top: 8px; }
+
+  .lb-row { display: flex; align-items: center; gap: 12px; padding: 12px 10px; border-bottom: 1px solid var(--border); background: var(--surface); margin-top: 8px; border-radius: 8px; border: 1px solid var(--border); }
+  .lb-row.me { border-color: var(--accent); }
+  .lb-rank { font-family: var(--font-mono); font-size: 14px; color: var(--text-faint); width: 20px; }
+  .lb-rank.first { color: var(--gold); font-weight: 800; }
+  .lb-name { flex: 1; font-size: 14.5px; font-weight: 700; }
+  .lb-record { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); }
+  .lb-profit { font-family: var(--font-mono); font-size: 16px; font-weight: 800; min-width: 60px; text-align: right; }
+  .lb-profit.pos { color: var(--accent); }
+  .lb-profit.neg { color: var(--danger); }
+
+  .empty { text-align: center; padding: 50px 20px; color: var(--text-faint); font-size: 14px; }
+  .refresh-note { margin: 16px 0 0; padding: 11px 13px; background: var(--surface); border-radius: 8px; font-size: 11px; color: var(--text-faint); line-height: 1.5; border-left: 2px solid var(--accent-dark); border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="row1">
+      <h1>Wager<span>Wire</span></h1>
+      <span class="who" id="whoLabel"></span>
+    </div>
+    <div class="tabbar" id="tabbar"></div>
+  </header>
+  <main id="main"></main>
+</div>
+
+<script>
+const SNAPSHOT_TIME = "Sep 11, 2026 ~5:00 PM PDT";
+const NOW = new Date("2026-09-11T17:00:00-07:00");
+
+const LEAGUES_META = [
+  { id: 'nfl', label: 'NFL', active: true, spreadSport: true },
+  { id: 'mlb', label: 'MLB', active: true, spreadSport: false },
+  { id: 'ncaaf', label: 'NCAAF', active: true, spreadSport: true },
+  { id: 'nba', label: 'NBA', active: false, returns: 'Oct 20, 2026' },
+  { id: 'nhl', label: 'NHL', active: false, returns: 'Sep 29, 2026' },
+  { id: 'ncaab', label: 'NCAAB', active: false, returns: 'early Nov 2026' },
+];
+
+const DATA = {
+"nfl": [
+{"id":"11ab3363","status":"scheduled","home":"CAR","away":"CHI","teams":{"CAR":{"name":"Carolina Panthers"},"CHI":{"name":"Chicago Bears"}},"win_probability":{"CAR":39,"CHI":61},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"14a137a8","status":"scheduled","home":"IND","away":"BAL","teams":{"IND":{"name":"Indianapolis Colts"},"BAL":{"name":"Baltimore Ravens"}},"win_probability":{"IND":38.6,"BAL":61.4},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"65387c45","status":"scheduled","home":"PIT","away":"ATL","teams":{"PIT":{"name":"Pittsburgh Steelers"},"ATL":{"name":"Atlanta Falcons"}},"win_probability":{"PIT":70.6,"ATL":29.4},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"6f9e9522","status":"scheduled","home":"JAC","away":"CLE","teams":{"JAC":{"name":"Jacksonville Jaguars"},"CLE":{"name":"Cleveland Browns"}},"win_probability":{"JAC":80.5,"CLE":19.5},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"71c9efbf","status":"scheduled","home":"CIN","away":"TB","teams":{"CIN":{"name":"Cincinnati Bengals"},"TB":{"name":"Tampa Bay Buccaneers"}},"win_probability":{"CIN":65.3,"TB":34.7},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"a08db76e","status":"scheduled","home":"TEN","away":"NYJ","teams":{"TEN":{"name":"Tennessee Titans"},"NYJ":{"name":"New York Jets"}},"win_probability":{"TEN":52.7,"NYJ":47.3},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"be0d6413","status":"scheduled","home":"DET","away":"NO","teams":{"DET":{"name":"Detroit Lions"},"NO":{"name":"New Orleans Saints"}},"win_probability":{"DET":73.8,"NO":26.2},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"db2b328c","status":"scheduled","home":"HOU","away":"BUF","teams":{"HOU":{"name":"Houston Texans"},"BUF":{"name":"Buffalo Bills"}},"win_probability":{"HOU":47.5,"BUF":52.5},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
+{"id":"02635d1a","status":"scheduled","home":"LAC","away":"ARI","teams":{"LAC":{"name":"Los Angeles Chargers"},"ARI":{"name":"Arizona Cardinals"}},"win_probability":{"LAC":80.1,"ARI":19.9},"local_start":"Sun Sep 13, 1:25 PM PDT","start":"2026-09-13T13:25:00-07:00"},
+{"id":"810f2cd8","status":"scheduled","home":"MIN","away":"GB","teams":{"MIN":{"name":"Minnesota Vikings"},"GB":{"name":"Green Bay Packers"}},"win_probability":{"MIN":53.5,"GB":46.5},"local_start":"Sun Sep 13, 1:25 PM PDT","start":"2026-09-13T13:25:00-07:00"},
+{"id":"6eee326a","status":"scheduled","home":"NYG","away":"DAL","teams":{"NYG":{"name":"New York Giants"},"DAL":{"name":"Dallas Cowboys"}},"title":"Sunday Night Football","local_start":"Sun Sep 13, 5:20 PM PDT","start":"2026-09-13T17:20:00-07:00"},
+{"id":"5c96a049","status":"scheduled","home":"KC","away":"DEN","teams":{"KC":{"name":"Kansas City Chiefs"},"DEN":{"name":"Denver Broncos"}},"title":"Monday Night Football","local_start":"Mon Sep 14, 5:15 PM PDT","start":"2026-09-14T17:15:00-07:00"},
+{"id":"2bf1ca8d","status":"closed","home":"SEA","away":"NE","teams":{"SEA":{"name":"Seattle Seahawks"},"NE":{"name":"New England Patriots"}},"score":{"SEA":13,"NE":10},"local_start":"Wed Sep 9, 5:20 PM PDT","start":"2026-09-09T17:20:00-07:00"},
+{"id":"c84dfc8c","status":"closed","home":"LA","away":"SF","teams":{"LA":{"name":"Los Angeles Rams"},"SF":{"name":"San Francisco 49ers"}},"score":{"LA":7,"SF":27},"local_start":"Thu Sep 10, 5:35 PM PDT","start":"2026-09-10T17:35:00-07:00"}
+],
+"mlb": [
+{"id":"a8971dc4","status":"inprogress","home":"ATL","away":"PHI","teams":{"ATL":{"name":"Atlanta Braves"},"PHI":{"name":"Philadelphia Phillies"}},"score":{"ATL":2,"PHI":3},"local_start":"Fri Sep 11, 4:15 PM PDT","start":"2026-09-11T16:15:00-07:00"},
+{"id":"c65c5816","status":"scheduled","home":"DET","away":"COL","teams":{"DET":{"name":"Detroit Tigers"},"COL":{"name":"Colorado Rockies"}},"local_start":"Sat Sep 12, 10:10 AM PDT","start":"2026-09-12T10:10:00-07:00"},
+{"id":"c2d2c981","status":"scheduled","home":"NYY","away":"NYM","teams":{"NYY":{"name":"New York Yankees"},"NYM":{"name":"New York Mets"}},"win_probability":{"NYY":62,"NYM":38},"local_start":"Sat Sep 12, 10:35 AM PDT","start":"2026-09-12T10:35:00-07:00"},
+{"id":"10990f10","status":"scheduled","home":"CHC","away":"PIT","teams":{"CHC":{"name":"Chicago Cubs"},"PIT":{"name":"Pittsburgh Pirates"}},"win_probability":{"CHC":53.1,"PIT":46.9},"local_start":"Sat Sep 12, 11:20 AM PDT","start":"2026-09-12T11:20:00-07:00"},
+{"id":"f888821e","status":"scheduled","home":"TOR","away":"BAL","teams":{"TOR":{"name":"Toronto Blue Jays"},"BAL":{"name":"Baltimore Orioles"}},"win_probability":{"TOR":50.2,"BAL":49.8},"local_start":"Sat Sep 12, 12:07 PM PDT","start":"2026-09-12T12:07:00-07:00"},
+{"id":"5e290fec","status":"scheduled","home":"SF","away":"SD","teams":{"SF":{"name":"San Francisco Giants"},"SD":{"name":"San Diego Padres"}},"win_probability":{"SF":40.8,"SD":59.2},"local_start":"Sat Sep 12, 1:05 PM PDT","start":"2026-09-12T13:05:00-07:00"},
+{"id":"8aa953e2","status":"scheduled","home":"WSH","away":"LAA","teams":{"WSH":{"name":"Washington Nationals"},"LAA":{"name":"Los Angeles Angels"}},"win_probability":{"WSH":51.8,"LAA":48.2},"local_start":"Sat Sep 12, 1:05 PM PDT","start":"2026-09-12T13:05:00-07:00"},
+{"id":"742c91be","status":"scheduled","home":"TB","away":"HOU","teams":{"TB":{"name":"Tampa Bay Rays"},"HOU":{"name":"Houston Astros"}},"win_probability":{"TB":57.1,"HOU":42.9},"local_start":"Sat Sep 12, 3:10 PM PDT","start":"2026-09-12T15:10:00-07:00"}
+],
+"ncaaf": [
+{"id":"86d0a040","status":"scheduled","home":"NCCU","away":"NCAT","teams":{"NCCU":{"name":"NC Central Eagles"},"NCAT":{"name":"NC A&T Aggies"}},"win_probability":{"NCCU":93.6,"NCAT":6.4},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"8cdd9b53","status":"scheduled","home":"PUR","away":"WAKE","teams":{"PUR":{"name":"Purdue Boilermakers"},"WAKE":{"name":"Wake Forest Demon Deacons"}},"win_probability":{"PUR":41.2,"WAKE":58.8},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"b19515c0","status":"scheduled","home":"ARMY","away":"USF","teams":{"ARMY":{"name":"Army Black Knights"},"USF":{"name":"South Florida Bulls"}},"win_probability":{"ARMY":60.9,"USF":39.1},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"e30b448e","status":"scheduled","home":"VT","away":"ODU","teams":{"VT":{"name":"Virginia Tech Hokies"},"ODU":{"name":"Old Dominion Monarchs"}},"win_probability":{"VT":90.1,"ODU":9.9},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"f55baffa","status":"scheduled","home":"URI","away":"ELON","teams":{"URI":{"name":"Rhode Island Rams"},"ELON":{"name":"Elon Phoenix"}},"win_probability":{"URI":75.3,"ELON":24.7},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"f8de216f","status":"scheduled","home":"TEM","away":"PSU","teams":{"TEM":{"name":"Temple Owls"},"PSU":{"name":"Penn State Nittany Lions"}},"win_probability":{"TEM":6.2,"PSU":93.8},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"fb70e65c","status":"scheduled","home":"UNC","away":"ETSU","teams":{"UNC":{"name":"North Carolina Tar Heels"},"ETSU":{"name":"East Tennessee State Buccaneers"}},"win_probability":{"UNC":99.3,"ETSU":0.7},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"0186355d","status":"scheduled","home":"OKST","away":"ORE","teams":{"OKST":{"name":"Oklahoma State Cowboys"},"ORE":{"name":"Oregon Ducks"}},"win_probability":{"OKST":7.6,"ORE":92.4},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
+{"id":"56187504","status":"inprogress","home":"NCST","away":"RICH","teams":{"NCST":{"name":"NC State Wolfpack"},"RICH":{"name":"Richmond Spiders"}},"score":{"NCST":56,"RICH":0},"local_start":"Fri Sep 11, 4:00 PM PDT","start":"2026-09-11T16:00:00-07:00"},
+{"id":"4a72745b","status":"inprogress","home":"BC","away":"RUTG","teams":{"BC":{"name":"Boston College Eagles"},"RUTG":{"name":"Rutgers Scarlet Knights"}},"score":{"BC":20,"RUTG":14},"local_start":"Fri Sep 11, 4:30 PM PDT","start":"2026-09-11T16:30:00-07:00"}
+]
+};
+
+const gameIndex = {};
+Object.keys(DATA).forEach(sport => DATA[sport].forEach(g => gameIndex[g.id] = { sport, game: g }));
+
+let profile = null;
+let allPicks = [];
+let players = [];
+let activeTab = 'games';
+let activeSport = 'nfl';
+let selectedSide = {};
+let setupError = '';
+
+function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
+
+function mondayOf(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  dt.setDate(dt.getDate() + diff);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+function weekLabel(d) { return 'Week of ' + mondayOf(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+function weekKey(d) { return mondayOf(d).toISOString().slice(0,10); }
+
+// ---------- spread math (payout is flat 1:1, no odds weighting) ----------
+function fmtUnits(n) {
+  const r = Math.round(n * 100) / 100;
+  return (r > 0 ? '+' : '') + r.toFixed(2) + 'u';
+}
+function computeSpread(sport, g) {
+  const meta = LEAGUES_META.find(l => l.id === sport);
+  if (!meta || !meta.spreadSport) return null;
+  const wp = g.win_probability;
+  if (!wp || wp[g.home] === undefined) return null;
+  const probHome = wp[g.home] / 100;
+  const diffPct = (probHome - 0.5) * 100;
+  let points = diffPct / 3.33;
+  points = Math.round(points * 2) / 2;
+  return points; // positive => home favored by this many points
+}
+
+// ---------- Firestore via plain REST (no SDK script needed) ----------
+const firebaseConfig = {
+  apiKey: "AIzaSyAQ75ZnN_5kI_qdA6tQtRw-9j1RIgcGOOs",
+  authDomain: "wagerwire-14c85.firebaseapp.com",
+  projectId: "wagerwire-14c85",
+  storageBucket: "wagerwire-14c85.firebasestorage.app",
+  messagingSenderId: "511907577437",
+  appId: "1:511907577437:web:4c0f21f3cb0320d51d17b4"
+};
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+const FS_DOC = `${FS_BASE}/wagerwire/global`;
+
+function toFsValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'string') return { stringValue: v };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFsValue) } };
+  return { mapValue: { fields: toFsFields(v) } };
+}
+function toFsFields(obj) {
+  const fields = {};
+  Object.keys(obj).forEach(k => fields[k] = toFsValue(obj[k]));
+  return fields;
+}
+function fromFsValue(v) {
+  if (!v) return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('integerValue' in v) return parseInt(v.integerValue, 10);
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('nullValue' in v) return null;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromFsValue);
+  if ('mapValue' in v) return fromFsFields(v.mapValue.fields || {});
+  return null;
+}
+function fromFsFields(fields) {
+  const obj = {};
+  Object.keys(fields || {}).forEach(k => obj[k] = fromFsValue(fields[k]));
+  return obj;
+}
+function describeFetchError(e) {
+  const msg = (e && e.message) || '';
+  if (!navigator.onLine) return 'You appear to be offline — check your connection and try again.';
+  if (/load failed|network|failed to fetch/i.test(msg)) {
+    return 'Network request was blocked before it reached Firestore (msg: "' + msg + '"). This can happen if the page is opened as a raw local file rather than over https, or if something on the network is blocking requests to firestore.googleapis.com.';
+  }
+  return msg || 'unknown error';
+}
+async function fsGet() {
+  const res = await fetch(`${FS_DOC}?key=${firebaseConfig.apiKey}`);
+  if (res.status === 404) return {};
+  if (!res.ok) { const t = await res.text().catch(()=>''); throw new Error('Firestore GET ' + res.status + ': ' + t.slice(0,150)); }
+  const json = await res.json();
+  return fromFsFields(json.fields);
+}
+async function fsPatch(partial) {
+  const fields = toFsFields(partial);
+  const params = new URLSearchParams();
+  params.append('key', firebaseConfig.apiKey);
+  Object.keys(partial).forEach(k => params.append('updateMask.fieldPaths', k));
+  const res = await fetch(`${FS_DOC}?${params.toString()}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields })
+  });
+  if (!res.ok) { const t = await res.text().catch(()=>''); throw new Error('Firestore PATCH ' + res.status + ': ' + t.slice(0,150)); }
+  return res.json();
+}
+
+// ---------- storage ----------
+function loadProfile() {
+  try { const v = localStorage.getItem('ww_profile'); profile = v ? JSON.parse(v) : null; }
+  catch(e) { profile = null; }
+}
+function saveProfile(p) {
+  profile = p;
+  try { localStorage.setItem('ww_profile', JSON.stringify(p)); } catch(e) {}
+}
+async function loadGlobalData() {
+  try {
+    const data = await fsGet();
+    return { players: data.players || [], picks: data.picks || [] };
+  } catch (e) { throw new Error(e.message || 'Firestore read failed'); }
+}
+async function savePlayers(list) { await fsPatch({ players: list }); }
+async function savePicks(picks) { await fsPatch({ picks: picks }); }
+
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    try {
+      const data = await fsGet();
+      let changed = false;
+      if (data.players && JSON.stringify(data.players) !== JSON.stringify(players)) { players = data.players; changed = true; }
+      if (data.picks && JSON.stringify(data.picks) !== JSON.stringify(allPicks)) { allPicks = data.picks; changed = true; }
+      if (changed && profile) render();
+    } catch (e) { /* ignore transient poll errors */ }
+  }, 8000);
+}
+
+// ---------- render root ----------
+function render() {
+  const scrollY = window.scrollY;
+  document.getElementById('whoLabel').textContent = profile ? profile.name : '';
+  renderTabs();
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+  if (!profile) { main.appendChild(renderSetup()); return; }
+  if (activeTab === 'games') main.appendChild(renderGames());
+  else if (activeTab === 'picks') main.appendChild(renderMyPicks());
+  else if (activeTab === 'board') main.appendChild(renderLeaderboard());
+  window.scrollTo(0, scrollY);
+}
+
+function renderTabs() {
+  const bar = document.getElementById('tabbar');
+  bar.innerHTML = '';
+  if (!profile) return;
+  [['games','Games'],['picks','My Bets'],['board','Leaderboard']].forEach(([id,label]) => {
+    const t = el('div', 'tab' + (activeTab === id ? ' active' : ''), label);
+    t.onclick = () => { activeTab = id; render(); };
+    bar.appendChild(t);
+  });
+}
+
+function renderSetup() {
+  const wrap = el('div');
+  const card = el('div', 'setup-card');
+  card.appendChild(el('label', null, 'Your name'));
+  const nameInput = el('input'); nameInput.placeholder = 'e.g. Jordan'; nameInput.value = profile?.name || '';
+  card.appendChild(nameInput);
+  const btnRow = el('div', 'btn-row');
+  const joinBtn = el('button', null, 'Continue');
+  btnRow.appendChild(joinBtn);
+  card.appendChild(btnRow);
+  if (setupError) card.appendChild(el('div', 'setup-hint', setupError));
+  card.appendChild(el('div', 'setup-hint', 'Everyone using this app shares one global leaderboard. Private leagues are coming in a future update.'));
+  wrap.appendChild(card);
+
+  joinBtn.onclick = async () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.style.borderColor = 'var(--danger)'; return; }
+    joinBtn.disabled = true; joinBtn.textContent = 'Loading…';
+    setupError = '';
+    try {
+      saveProfile({ name });
+      const g = await loadGlobalData();
+      players = g.players; allPicks = g.picks;
+      if (!players.includes(name)) { players.push(name); await savePlayers(players); }
+      startPolling();
+      activeTab = 'games';
+      render();
+    } catch (e) {
+      setupError = "Couldn't connect (" + describeFetchError(e) + ") — try again in a moment.";
+      joinBtn.disabled = false; joinBtn.textContent = 'Continue';
+      render();
+    }
+  };
+  return wrap;
+}
+
+function statusInfo(status) {
+  if (status === 'inprogress') return { text: 'Live', live: true };
+  if (status === 'closed' || status === 'complete') return { text: 'Final', live: false };
+  return { text: 'Upcoming', live: false };
+}
+
+function renderGames() {
+  const wrap = el('div');
+  const scroller = el('div', 'league-scroller');
+  LEAGUES_META.forEach(lg => {
+    const pill = el('button', 'league-pill' + (lg.id === activeSport ? ' active' : '') + (!lg.active ? ' off' : ''), lg.label);
+    pill.onclick = () => { activeSport = lg.id; render(); };
+    scroller.appendChild(pill);
+  });
+  wrap.appendChild(scroller);
+
+  const meta = LEAGUES_META.find(l => l.id === activeSport);
+  if (!meta.active) {
+    const card = el('div', 'offseason-card');
+    card.appendChild(el('div', 'big', meta.label + ' is in the offseason'));
+    card.appendChild(el('div', 'small', "We'll be back " + meta.returns));
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  const games = (DATA[activeSport] || []).filter(g => new Date(g.start) > NOW && g.status === 'scheduled');
+  const list = el('div');
+  if (!games.length) {
+    list.appendChild(el('div', 'empty', 'No upcoming ' + meta.label + ' games in this snapshot right now.'));
+  } else {
+    games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
+  }
+  wrap.appendChild(list);
+  wrap.appendChild(el('div', 'refresh-note', 'Snapshot from ' + SNAPSHOT_TIME + ' — only games that hadn\'t started yet at that time are shown. Spreads and odds are modeled from win-probability data, not live sportsbook lines. Ask Claude to "refresh Wager Wire" for current games and to settle finished picks.'));
+  return wrap;
+}
+
+function myPickFor(gameId) { return allPicks.find(p => p.gameId === gameId && p.player === profile.name); }
+
+function renderGameCard(g, sport, meta) {
+  const st = statusInfo(g.status);
+  const home = g.teams[g.home], away = g.teams[g.away];
+  const completed = st.text === 'Final';
+  const homeScore = g.score ? g.score[g.home] : undefined;
+  const awayScore = g.score ? g.score[g.away] : undefined;
+  const homeWon = completed && homeScore > awayScore;
+  const awayWon = completed && awayScore > homeScore;
+
+  const card = el('div', 'event-card');
+  const top = el('div', 'event-top');
+  top.appendChild(el('span', 'event-meta' + (st.live ? ' live' : ''), st.text));
+  top.appendChild(el('span', 'event-meta', g.title || g.local_start));
+  card.appendChild(top);
+
+  [{ ab: g.away, t: away, sc: awayScore, won: awayWon, lost: homeWon },
+   { ab: g.home, t: home, sc: homeScore, won: homeWon, lost: awayWon }].forEach(row => {
+    const r = el('div', 'team-row' + (row.won ? ' winner' : row.lost ? ' loser' : ''));
+    r.appendChild(el('span', 'team-name', row.t.name));
+    r.appendChild(el('span', 'team-score', row.sc !== undefined ? row.sc : ''));
+    card.appendChild(r);
+  });
+
+  const existingPick = myPickFor(g.id);
+  const spread = computeSpread(sport, g);
+
+  if (existingPick) {
+    const note = el('div', 'locked-note');
+    note.appendChild(el('div', 'ln-title', 'Your bet'));
+    note.innerHTML += `${existingPick.sideAbbr} · <b>${existingPick.units}u</b> risked`;
+    card.appendChild(note);
+    return card;
+  }
+  if (completed) {
+    card.appendChild(el('div', 'no-odds-note', 'Game already final — no pick placed'));
+    return card;
+  }
+
+  const grid = el('div', 'outcome-grid');
+  [g.away, g.home].forEach(ab => {
+    const btn = el('div', 'outcome-btn' + (selectedSide[g.id] === ab ? ' selected' : ''));
+    const label = spread !== null
+      ? (ab === g.home ? (spread > 0 ? '-' + spread : (spread < 0 ? '+' + Math.abs(spread) : 'PK')) : (spread > 0 ? '+' + spread : (spread < 0 ? '-' + Math.abs(spread) : 'PK')))
+      : 'ML';
+    btn.innerHTML = `<div class="oc-team">${ab}</div><div class="oc-line">${label}</div>`;
+    btn.onclick = () => {
+      selectedSide[g.id] = ab;
+      grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      lockBtn.disabled = false;
+      lockBtn.textContent = 'Lock pick: ' + ab;
+    };
+    grid.appendChild(btn);
+  });
+  card.appendChild(grid);
+
+  const slip = el('div', 'bet-slip');
+  const bsRow = el('div', 'bs-row');
+  bsRow.appendChild(el('label', null, 'Units'));
+  const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = '1';
+  bsRow.appendChild(unitsInput);
+  slip.appendChild(bsRow);
+  const lockBtn = el('button', 'lock-btn', 'Select a side');
+  lockBtn.disabled = true;
+  slip.appendChild(lockBtn);
+  const errEl = el('div', 'pick-error');
+  slip.appendChild(errEl);
+  card.appendChild(slip);
+
+  lockBtn.onclick = async () => {
+    const ab = selectedSide[g.id];
+    const units = parseFloat(unitsInput.value);
+    errEl.textContent = '';
+    if (!ab) { errEl.textContent = 'Pick a side first.'; return; }
+    if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
+    const pick = {
+      id: profile.name + '_' + g.id + '_' + Date.now(),
+      player: profile.name, sport, gameId: g.id,
+      gameLabel: g.away + ' @ ' + g.home,
+      sideAbbr: ab, units,
+      week: weekKey(new Date(g.start)), weekLabel: weekLabel(new Date(g.start)),
+      timestamp: new Date().toISOString()
+    };
+    lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
+    allPicks.push(pick);
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await savePicks(allPicks);
+        lastErr = null;
+        break;
+      } catch (e) { lastErr = e; }
+    }
+    if (lastErr) {
+      allPicks.pop();
+      lockBtn.disabled = false; lockBtn.textContent = 'Lock pick: ' + ab;
+      errEl.textContent = "Couldn't save (" + describeFetchError(lastErr) + ") — try again.";
+    } else {
+      render();
+    }
+  };
+
+  return card;
+}
+
+function settlePick(p) {
+  const idx = gameIndex[p.gameId];
+  if (!idx) return { status: 'pending' };
+  const g = idx.game;
+  if (g.status !== 'closed' && g.status !== 'complete') return { status: 'pending' };
+  const homeScore = g.score?.[g.home], awayScore = g.score?.[g.away];
+  if (homeScore === undefined || awayScore === undefined) return { status: 'pending' };
+  const winnerAbbr = homeScore > awayScore ? g.home : (awayScore > homeScore ? g.away : null);
+  if (winnerAbbr === null) return { status: 'push' };
+  const won = winnerAbbr === p.sideAbbr;
+  return { status: won ? 'win' : 'loss', profit: won ? p.units : -p.units };
+}
+function potentialWin(p) { return p.units; }
+
+function currentProfit(name) {
+  return allPicks.filter(p => p.player === name).reduce((s,p) => {
+    const r = settlePick(p);
+    if (r.status === 'win' || r.status === 'loss') return s + r.profit;
+    return s;
+  }, 0);
+}
+function potentialProfit(name) {
+  return allPicks.filter(p => p.player === name).reduce((s,p) => {
+    const r = settlePick(p);
+    if (r.status === 'win' || r.status === 'loss') return s + r.profit;
+    if (r.status === 'pending') return s + potentialWin(p);
+    return s;
+  }, 0);
+}
+function rankAmong(valueForName) {
+  const pool = players.length ? players.slice() : [profile.name];
+  if (!pool.includes(profile.name)) pool.push(profile.name);
+  const arr = pool.map(name => ({ name, val: valueForName(name) }));
+  arr.sort((a,b) => b.val - a.val);
+  const idx = arr.findIndex(x => x.name === profile.name);
+  return { rank: idx + 1, total: arr.length };
+}
+
+function renderMyPicks() {
+  const wrap = el('div');
+  const mine = allPicks.filter(p => p.player === profile.name).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  const curRank = rankAmong(n => n === profile.name ? currentProfit(n) : currentProfit(n));
+  const potRank = rankAmong(n => n === profile.name ? potentialProfit(n) : currentProfit(n));
+  const banner = el('div', 'rank-banner');
+  const c1 = el('div', 'rank-cell');
+  c1.appendChild(el('div', 'rc-label', 'Current rank'));
+  c1.appendChild(el('div', 'rc-value', '#' + curRank.rank));
+  c1.appendChild(el('div', 'rc-sub', 'of ' + curRank.total + ' · ' + fmtUnits(currentProfit(profile.name))));
+  banner.appendChild(c1);
+  const c2 = el('div', 'rank-cell');
+  c2.appendChild(el('div', 'rc-label', 'If all bets hit'));
+  c2.appendChild(el('div', 'rc-value accent', '#' + potRank.rank));
+  c2.appendChild(el('div', 'rc-sub', 'of ' + potRank.total + ' · ' + fmtUnits(potentialProfit(profile.name))));
+  banner.appendChild(c2);
+  wrap.appendChild(banner);
+
+  if (!mine.length) {
+    wrap.appendChild(el('div', 'empty', 'No picks yet — head to Games and lock one in.'));
+    return wrap;
+  }
+  const byWeek = {};
+  mine.forEach(p => { (byWeek[p.week] = byWeek[p.week] || []).push(p); });
+  Object.keys(byWeek).sort().reverse().forEach(wk => {
+    wrap.appendChild(el('div', 'week-header', byWeek[wk][0].weekLabel));
+    byWeek[wk].forEach(p => {
+      const r = settlePick(p);
+      const row = el('div', 'pick-row');
+      const left = el('div');
+      left.appendChild(el('div', 'who', p.gameLabel));
+      left.appendChild(el('div', 'detail', `${p.sideAbbr} · ${p.units}u risked`));
+      row.appendChild(left);
+      let resultHtml = '', cls = 'pending';
+      if (r.status === 'win') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Won</span>'; cls = 'win'; }
+      else if (r.status === 'loss') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Lost</span>'; cls = 'loss'; }
+      else if (r.status === 'push') { resultHtml = 'Push<span class="sub">Refunded</span>'; cls = 'pending'; }
+      else { resultHtml = fmtUnits(potentialWin(p)) + '<span class="sub">If it hits</span>'; cls = 'pending'; }
+      row.appendChild(el('div', 'result ' + cls, resultHtml));
+      wrap.appendChild(row);
+    });
+  });
+  return wrap;
+}
+
+function renderLeaderboard() {
+  const wrap = el('div');
+  const names = players.length ? players.slice() : [];
+  if (profile && !names.includes(profile.name)) names.push(profile.name);
+  const records = {};
+  names.forEach(m => { records[m] = { w: 0, l: 0 }; });
+  allPicks.forEach(p => {
+    if (!(p.player in records)) records[p.player] = { w: 0, l: 0 };
+    const r = settlePick(p);
+    if (r.status === 'win') records[p.player].w++;
+    else if (r.status === 'loss') records[p.player].l++;
+  });
+  const ranked = names.map(name => ({ name, profit: currentProfit(name), rec: records[name] })).sort((a,b) => b.profit - a.profit);
+  if (!ranked.length) {
+    wrap.appendChild(el('div', 'empty', 'No picks settled yet.'));
+    return wrap;
+  }
+  ranked.forEach((r, i) => {
+    const row = el('div', 'lb-row' + (profile && r.name === profile.name ? ' me' : ''));
+    row.appendChild(el('div', 'lb-rank' + (i === 0 && r.profit > 0 ? ' first' : ''), (i+1).toString()));
+    const nameWrap = el('div', 'lb-name', r.name);
+    row.appendChild(nameWrap);
+    row.appendChild(el('div', 'lb-record', `${r.rec.w}-${r.rec.l}`));
+    row.appendChild(el('div', 'lb-profit ' + (r.profit > 0 ? 'pos' : r.profit < 0 ? 'neg' : ''), fmtUnits(r.profit)));
+    wrap.appendChild(row);
+  });
+  wrap.appendChild(el('div', 'refresh-note', 'Payouts are flat 1:1 — win a pick, gain the units risked; lose it, drop the same amount. Ask Claude to refresh for the latest results.'));
+  return wrap;
+}
+
+(async function init() {
+  loadProfile();
+  if (profile) {
+    try {
+      const g = await loadGlobalData();
+      players = g.players; allPicks = g.picks;
+      if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
+      startPolling();
+    } catch (e) {
+      setupError = "Had trouble connecting to the shared board (" + describeFetchError(e) + ") — you can still continue.";
+    }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
