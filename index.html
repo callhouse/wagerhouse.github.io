@@ -211,12 +211,20 @@ async function refreshLiveScores() {
     const meta = LEAGUES_META.find(l => l.id === sport);
     if (!meta || !meta.active) continue;
     const { sport: espnSport, league } = ESPN_PATHS[sport];
-    try {
-      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${league}/scoreboard`);
-      if (!res.ok) continue;
-      const json = await res.json();
-      const events = json.events || [];
-      (DATA[sport] || []).forEach(g => {
+    const games = DATA[sport] || [];
+    if (!games.length) continue;
+    const dates = [...new Set(games.map(g => g.start.slice(0, 10).replace(/-/g, '')))];
+    let events = [];
+    for (const date of dates) {
+      try {
+        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${league}/scoreboard?dates=${date}&limit=200`);
+        if (!res.ok) continue;
+        const json = await res.json();
+        events = events.concat(json.events || []);
+      } catch (e) { /* best-effort per date */ }
+    }
+    if (!events.length) continue;
+    games.forEach(g => {
         const homeName = g.teams[g.home]?.name, awayName = g.teams[g.away]?.name;
         const match = events.find(ev => {
           const comp = ev.competitions?.[0];
@@ -233,7 +241,6 @@ async function refreshLiveScores() {
         else if (state === 'in') { g.status = 'inprogress'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; g.liveDetail = match.status?.type?.shortDetail || null; }
         else { g.status = 'scheduled'; g.liveDetail = null; }
       });
-    } catch (e) { /* live check best-effort; ignore failures for this sport */ }
   }
 }
 
