@@ -138,8 +138,7 @@
 </div>
 
 <script>
-const SNAPSHOT_TIME = "Sep 11, 2026 ~5:00 PM PDT";
-const NOW = new Date("2026-09-11T17:00:00-07:00");
+
 
 const LEAGUES_META = [
   { id: 'nfl', label: 'NFL', active: true, spreadSport: true },
@@ -150,106 +149,84 @@ const LEAGUES_META = [
   { id: 'ncaab', label: 'NCAAB', active: false, returns: 'early Nov 2026' },
 ];
 
-const DATA = {
-"nfl": [
-{"id":"11ab3363","status":"scheduled","home":"CAR","away":"CHI","teams":{"CAR":{"name":"Carolina Panthers"},"CHI":{"name":"Chicago Bears"}},"win_probability":{"CAR":39,"CHI":61},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"14a137a8","status":"scheduled","home":"IND","away":"BAL","teams":{"IND":{"name":"Indianapolis Colts"},"BAL":{"name":"Baltimore Ravens"}},"win_probability":{"IND":38.6,"BAL":61.4},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"65387c45","status":"scheduled","home":"PIT","away":"ATL","teams":{"PIT":{"name":"Pittsburgh Steelers"},"ATL":{"name":"Atlanta Falcons"}},"win_probability":{"PIT":70.6,"ATL":29.4},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"6f9e9522","status":"scheduled","home":"JAC","away":"CLE","teams":{"JAC":{"name":"Jacksonville Jaguars"},"CLE":{"name":"Cleveland Browns"}},"win_probability":{"JAC":80.5,"CLE":19.5},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"71c9efbf","status":"scheduled","home":"CIN","away":"TB","teams":{"CIN":{"name":"Cincinnati Bengals"},"TB":{"name":"Tampa Bay Buccaneers"}},"win_probability":{"CIN":65.3,"TB":34.7},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"a08db76e","status":"scheduled","home":"TEN","away":"NYJ","teams":{"TEN":{"name":"Tennessee Titans"},"NYJ":{"name":"New York Jets"}},"win_probability":{"TEN":52.7,"NYJ":47.3},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"be0d6413","status":"scheduled","home":"DET","away":"NO","teams":{"DET":{"name":"Detroit Lions"},"NO":{"name":"New Orleans Saints"}},"win_probability":{"DET":73.8,"NO":26.2},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"db2b328c","status":"scheduled","home":"HOU","away":"BUF","teams":{"HOU":{"name":"Houston Texans"},"BUF":{"name":"Buffalo Bills"}},"win_probability":{"HOU":47.5,"BUF":52.5},"local_start":"Sun Sep 13, 10:00 AM PDT","start":"2026-09-13T10:00:00-07:00"},
-{"id":"02635d1a","status":"scheduled","home":"LAC","away":"ARI","teams":{"LAC":{"name":"Los Angeles Chargers"},"ARI":{"name":"Arizona Cardinals"}},"win_probability":{"LAC":80.1,"ARI":19.9},"local_start":"Sun Sep 13, 1:25 PM PDT","start":"2026-09-13T13:25:00-07:00"},
-{"id":"810f2cd8","status":"scheduled","home":"MIN","away":"GB","teams":{"MIN":{"name":"Minnesota Vikings"},"GB":{"name":"Green Bay Packers"}},"win_probability":{"MIN":53.5,"GB":46.5},"local_start":"Sun Sep 13, 1:25 PM PDT","start":"2026-09-13T13:25:00-07:00"},
-{"id":"6eee326a","status":"scheduled","home":"NYG","away":"DAL","teams":{"NYG":{"name":"New York Giants"},"DAL":{"name":"Dallas Cowboys"}},"title":"Sunday Night Football","local_start":"Sun Sep 13, 5:20 PM PDT","start":"2026-09-13T17:20:00-07:00"},
-{"id":"5c96a049","status":"scheduled","home":"KC","away":"DEN","teams":{"KC":{"name":"Kansas City Chiefs"},"DEN":{"name":"Denver Broncos"}},"title":"Monday Night Football","local_start":"Mon Sep 14, 5:15 PM PDT","start":"2026-09-14T17:15:00-07:00"},
-{"id":"2bf1ca8d","status":"closed","home":"SEA","away":"NE","teams":{"SEA":{"name":"Seattle Seahawks"},"NE":{"name":"New England Patriots"}},"score":{"SEA":13,"NE":10},"local_start":"Wed Sep 9, 5:20 PM PDT","start":"2026-09-09T17:20:00-07:00"},
-{"id":"c84dfc8c","status":"closed","home":"LA","away":"SF","teams":{"LA":{"name":"Los Angeles Rams"},"SF":{"name":"San Francisco 49ers"}},"score":{"LA":7,"SF":27},"local_start":"Thu Sep 10, 5:35 PM PDT","start":"2026-09-10T17:35:00-07:00"}
-],
-"mlb": [
-{"id":"a8971dc4","status":"inprogress","home":"ATL","away":"PHI","teams":{"ATL":{"name":"Atlanta Braves"},"PHI":{"name":"Philadelphia Phillies"}},"score":{"ATL":2,"PHI":3},"local_start":"Fri Sep 11, 4:15 PM PDT","start":"2026-09-11T16:15:00-07:00"},
-{"id":"c65c5816","status":"scheduled","home":"DET","away":"COL","teams":{"DET":{"name":"Detroit Tigers"},"COL":{"name":"Colorado Rockies"}},"local_start":"Sat Sep 12, 10:10 AM PDT","start":"2026-09-12T10:10:00-07:00"},
-{"id":"c2d2c981","status":"scheduled","home":"NYY","away":"NYM","teams":{"NYY":{"name":"New York Yankees"},"NYM":{"name":"New York Mets"}},"win_probability":{"NYY":62,"NYM":38},"local_start":"Sat Sep 12, 10:35 AM PDT","start":"2026-09-12T10:35:00-07:00"},
-{"id":"10990f10","status":"scheduled","home":"CHC","away":"PIT","teams":{"CHC":{"name":"Chicago Cubs"},"PIT":{"name":"Pittsburgh Pirates"}},"win_probability":{"CHC":53.1,"PIT":46.9},"local_start":"Sat Sep 12, 11:20 AM PDT","start":"2026-09-12T11:20:00-07:00"},
-{"id":"f888821e","status":"scheduled","home":"TOR","away":"BAL","teams":{"TOR":{"name":"Toronto Blue Jays"},"BAL":{"name":"Baltimore Orioles"}},"win_probability":{"TOR":50.2,"BAL":49.8},"local_start":"Sat Sep 12, 12:07 PM PDT","start":"2026-09-12T12:07:00-07:00"},
-{"id":"5e290fec","status":"scheduled","home":"SF","away":"SD","teams":{"SF":{"name":"San Francisco Giants"},"SD":{"name":"San Diego Padres"}},"win_probability":{"SF":40.8,"SD":59.2},"local_start":"Sat Sep 12, 1:05 PM PDT","start":"2026-09-12T13:05:00-07:00"},
-{"id":"8aa953e2","status":"scheduled","home":"WSH","away":"LAA","teams":{"WSH":{"name":"Washington Nationals"},"LAA":{"name":"Los Angeles Angels"}},"win_probability":{"WSH":51.8,"LAA":48.2},"local_start":"Sat Sep 12, 1:05 PM PDT","start":"2026-09-12T13:05:00-07:00"},
-{"id":"742c91be","status":"scheduled","home":"TB","away":"HOU","teams":{"TB":{"name":"Tampa Bay Rays"},"HOU":{"name":"Houston Astros"}},"win_probability":{"TB":57.1,"HOU":42.9},"local_start":"Sat Sep 12, 3:10 PM PDT","start":"2026-09-12T15:10:00-07:00"}
-],
-"ncaaf": [
-{"id":"86d0a040","status":"scheduled","home":"NCCU","away":"NCAT","teams":{"NCCU":{"name":"NC Central Eagles"},"NCAT":{"name":"NC A&T Aggies"}},"win_probability":{"NCCU":93.6,"NCAT":6.4},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"8cdd9b53","status":"scheduled","home":"PUR","away":"WAKE","teams":{"PUR":{"name":"Purdue Boilermakers"},"WAKE":{"name":"Wake Forest Demon Deacons"}},"win_probability":{"PUR":41.2,"WAKE":58.8},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"b19515c0","status":"scheduled","home":"ARMY","away":"USF","teams":{"ARMY":{"name":"Army Black Knights"},"USF":{"name":"South Florida Bulls"}},"win_probability":{"ARMY":60.9,"USF":39.1},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"e30b448e","status":"scheduled","home":"VT","away":"ODU","teams":{"VT":{"name":"Virginia Tech Hokies"},"ODU":{"name":"Old Dominion Monarchs"}},"win_probability":{"VT":90.1,"ODU":9.9},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"f55baffa","status":"scheduled","home":"URI","away":"ELON","teams":{"URI":{"name":"Rhode Island Rams"},"ELON":{"name":"Elon Phoenix"}},"win_probability":{"URI":75.3,"ELON":24.7},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"f8de216f","status":"scheduled","home":"TEM","away":"PSU","teams":{"TEM":{"name":"Temple Owls"},"PSU":{"name":"Penn State Nittany Lions"}},"win_probability":{"TEM":6.2,"PSU":93.8},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"fb70e65c","status":"scheduled","home":"UNC","away":"ETSU","teams":{"UNC":{"name":"North Carolina Tar Heels"},"ETSU":{"name":"East Tennessee State Buccaneers"}},"win_probability":{"UNC":99.3,"ETSU":0.7},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"0186355d","status":"scheduled","home":"OKST","away":"ORE","teams":{"OKST":{"name":"Oklahoma State Cowboys"},"ORE":{"name":"Oregon Ducks"}},"win_probability":{"OKST":7.6,"ORE":92.4},"local_start":"Sat Sep 12, 9:00 AM PDT","start":"2026-09-12T09:00:00-07:00"},
-{"id":"56187504","status":"inprogress","home":"NCST","away":"RICH","teams":{"NCST":{"name":"NC State Wolfpack"},"RICH":{"name":"Richmond Spiders"}},"score":{"NCST":56,"RICH":0},"local_start":"Fri Sep 11, 4:00 PM PDT","start":"2026-09-11T16:00:00-07:00"},
-{"id":"4a72745b","status":"inprogress","home":"BC","away":"RUTG","teams":{"BC":{"name":"Boston College Eagles"},"RUTG":{"name":"Rutgers Scarlet Knights"}},"score":{"BC":20,"RUTG":14},"local_start":"Fri Sep 11, 4:30 PM PDT","start":"2026-09-11T16:30:00-07:00"}
-]
-};
-
+let DATA = { nfl: [], mlb: [], ncaaf: [] };
 const gameIndex = {};
-Object.keys(DATA).forEach(sport => DATA[sport].forEach(g => gameIndex[g.id] = { sport, game: g }));
+function rebuildGameIndex() {
+  Object.keys(gameIndex).forEach(k => delete gameIndex[k]);
+  Object.keys(DATA).forEach(sport => (DATA[sport] || []).forEach(g => gameIndex[g.id] = { sport, game: g }));
+}
 
-// ---------- live score checking (ESPN public scoreboard) ----------
+// ---------- live game list + scores (ESPN public scoreboard) ----------
 const ESPN_PATHS = {
   nfl: { sport: 'football', league: 'nfl' },
   mlb: { sport: 'baseball', league: 'mlb' },
   ncaaf: { sport: 'football', league: 'college-football' },
 };
-function normTeam(name) { return (name || '').toLowerCase().replace(/[^a-z]/g, ''); }
-function teamsMatch(a, b) {
-  const na = normTeam(a), nb = normTeam(b);
-  if (!na || !nb || na.length < 4 || nb.length < 4) return false;
-  return na.includes(nb) || nb.includes(na);
+async function fetchSportGames(sport) {
+  const { sport: espnSport, league } = ESPN_PATHS[sport];
+  const now = new Date();
+  const dateStrs = [0, 1].map(offset => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0, 10).replace(/-/g, '');
+  });
+  const seen = new Set();
+  const events = [];
+  for (const date of dateStrs) {
+    try {
+      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${league}/scoreboard?dates=${date}&limit=300`);
+      if (!res.ok) continue;
+      const json = await res.json();
+      (json.events || []).forEach(ev => { if (!seen.has(ev.id)) { seen.add(ev.id); events.push(ev); } });
+    } catch (e) { /* best-effort per date */ }
+  }
+  return events.map(ev => {
+    const comp = ev.competitions && ev.competitions[0];
+    if (!comp) return null;
+    const home = comp.competitors && comp.competitors.find(c => c.homeAway === 'home');
+    const away = comp.competitors && comp.competitors.find(c => c.homeAway === 'away');
+    if (!home || !away || !home.team || !away.team) return null;
+    const homeAbbr = home.team.abbreviation, awayAbbr = away.team.abbreviation;
+    const state = ev.status && ev.status.type && ev.status.type.state;
+    const status = state === 'post' ? 'closed' : (state === 'in' ? 'inprogress' : 'scheduled');
+    const odds = comp.odds && comp.odds[0];
+    const g = {
+      id: ev.id,
+      status,
+      home: homeAbbr, away: awayAbbr,
+      teams: { [homeAbbr]: { name: home.team.displayName }, [awayAbbr]: { name: away.team.displayName } },
+      start: ev.date,
+      local_start: new Date(ev.date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+      title: (comp.notes && comp.notes[0] && comp.notes[0].headline) || null,
+      liveDetail: state === 'in' ? ((ev.status.type && ev.status.type.shortDetail) || null) : null,
+      oddsDetails: (odds && odds.details) || null,
+    };
+    if (status !== 'scheduled') {
+      g.score = { [homeAbbr]: Number(home.score), [awayAbbr]: Number(away.score) };
+    }
+    return g;
+  }).filter(Boolean);
 }
-async function refreshLiveScores() {
+let gamesLoaded = false;
+async function refreshGameLists() {
   for (const sport of Object.keys(ESPN_PATHS)) {
     const meta = LEAGUES_META.find(l => l.id === sport);
     if (!meta || !meta.active) continue;
-    const { sport: espnSport, league } = ESPN_PATHS[sport];
-    const games = DATA[sport] || [];
-    if (!games.length) continue;
-    const dates = [...new Set(games.map(g => g.start.slice(0, 10).replace(/-/g, '')))];
-    let events = [];
-    for (const date of dates) {
-      try {
-        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${league}/scoreboard?dates=${date}&limit=200`);
-        if (!res.ok) continue;
-        const json = await res.json();
-        events = events.concat(json.events || []);
-      } catch (e) { /* best-effort per date */ }
-    }
-    if (!events.length) continue;
-    games.forEach(g => {
-        const homeName = g.teams[g.home]?.name, awayName = g.teams[g.away]?.name;
-        const match = events.find(ev => {
-          const comp = ev.competitions?.[0];
-          const home = comp?.competitors?.find(c => c.homeAway === 'home');
-          const away = comp?.competitors?.find(c => c.homeAway === 'away');
-          return home && away && teamsMatch(home.team?.displayName, homeName) && teamsMatch(away.team?.displayName, awayName);
-        });
-        if (!match) return;
-        const comp = match.competitions[0];
-        const state = match.status?.type?.state;
-        const home = comp.competitors.find(c => c.homeAway === 'home');
-        const away = comp.competitors.find(c => c.homeAway === 'away');
-        if (state === 'post') { g.status = 'closed'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; g.liveDetail = null; }
-        else if (state === 'in') { g.status = 'inprogress'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; g.liveDetail = match.status?.type?.shortDetail || null; }
-        else { g.status = 'scheduled'; g.liveDetail = null; }
-      });
+    try {
+      const games = await fetchSportGames(sport);
+      if (games.length) DATA[sport] = games;
+    } catch (e) { /* keep previous list for this sport on failure */ }
   }
+  rebuildGameIndex();
+  gamesLoaded = true;
 }
 
 let liveTimer = null;
 function startLiveScoreChecks() {
-  refreshLiveScores().then(() => { if (profile) render(); });
+  refreshGameLists().then(() => { if (profile) render(); });
   if (liveTimer) return;
   liveTimer = setInterval(async () => {
-    await refreshLiveScores();
+    await refreshGameLists();
     if (profile) render();
   }, 60000);
 }
@@ -275,21 +252,23 @@ function mondayOf(d) {
 function weekLabel(d) { return 'Week of ' + mondayOf(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 function weekKey(d) { return mondayOf(d).toISOString().slice(0,10); }
 
-// ---------- spread math (payout is flat 1:1, no odds weighting) ----------
+// ---------- spread from real ESPN posted line (payout is flat 1:1, no odds weighting) ----------
 function fmtUnits(n) {
   const r = Math.round(n * 100) / 100;
   return (r > 0 ? '+' : '') + r.toFixed(2) + 'u';
 }
+// Returns spread as the HOME team's number: negative = home favored, positive = home underdog. null = no posted line.
 function computeSpread(sport, g) {
   const meta = LEAGUES_META.find(l => l.id === sport);
   if (!meta || !meta.spreadSport) return null;
-  const wp = g.win_probability;
-  if (!wp || wp[g.home] === undefined) return null;
-  const probHome = wp[g.home] / 100;
-  const diffPct = (probHome - 0.5) * 100;
-  let points = diffPct / 3.33;
-  points = Math.round(points * 2) / 2;
-  return points; // positive => home favored by this many points
+  if (!g.oddsDetails) return null;
+  const m = g.oddsDetails.match(/^([A-Za-z.]+)\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const favTeam = m[1].toUpperCase();
+  const magnitude = Math.abs(parseFloat(m[2]));
+  if (favTeam === (g.home || '').toUpperCase()) return -magnitude;
+  if (favTeam === (g.away || '').toUpperCase()) return magnitude;
+  return null;
 }
 
 // ---------- Firestore via plain REST (no SDK script needed) ----------
@@ -485,12 +464,12 @@ function renderGames() {
   const games = DATA[activeSport] || [];
   const list = el('div');
   if (!games.length) {
-    list.appendChild(el('div', 'empty', 'No ' + meta.label + ' games in this snapshot right now.'));
+    list.appendChild(el('div', 'empty', gamesLoaded ? ('No ' + meta.label + ' games found for today/tomorrow.') : 'Loading games…'));
   } else {
     games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
   }
   wrap.appendChild(list);
-  wrap.appendChild(el('div', 'refresh-note', 'Game list is a snapshot from ' + SNAPSHOT_TIME + ' (spreads are modeled from win-probability data, not live sportsbook lines), but scores and game state are checked live from ESPN and update automatically.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Games, scores, and spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard and refresh automatically. Some smaller matchups won\'t have a posted spread — those show moneyline only.'));
   return wrap;
 }
 
@@ -542,9 +521,11 @@ function renderGameCard(g, sport, meta) {
   const grid = el('div', 'outcome-grid');
   [g.away, g.home].forEach(ab => {
     const btn = el('div', 'outcome-btn' + (selectedSide[g.id] === ab ? ' selected' : ''));
-    const label = spread !== null
-      ? (ab === g.home ? (spread > 0 ? '-' + spread : (spread < 0 ? '+' + Math.abs(spread) : 'PK')) : (spread > 0 ? '+' + spread : (spread < 0 ? '-' + Math.abs(spread) : 'PK')))
-      : 'ML';
+    let label = 'ML';
+    if (spread !== null) {
+      const val = ab === g.home ? spread : -spread;
+      label = val === 0 ? 'PK' : (val > 0 ? '+' + val : val.toString());
+    }
     btn.innerHTML = `<div class="oc-team">${ab}</div><div class="oc-line">${label}</div>`;
     btn.onclick = () => {
       selectedSide[g.id] = ab;
