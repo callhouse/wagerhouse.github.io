@@ -94,6 +94,7 @@
 
   .pick-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); background: var(--surface); border-radius: 8px; margin-top: 8px; border: 1px solid var(--border); }
   .pick-row .who { font-size: 13.5px; font-weight: 700; }
+  .pick-row .who .pick-league { display: inline-block; background: var(--surface-2); color: var(--accent); font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-right: 6px; text-transform: uppercase; letter-spacing: 0.02em; vertical-align: middle; }
   .pick-row .detail { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; font-family: var(--font-mono); }
   .pick-row .result { font-family: var(--font-mono); font-size: 15px; font-weight: 800; text-align: right; }
   .pick-row .result .sub { display: block; font-size: 9.5px; color: var(--text-faint); font-weight: 500; text-transform: uppercase; font-family: var(--font-head); }
@@ -222,9 +223,9 @@ async function refreshLiveScores() {
         const state = match.status?.type?.state;
         const home = comp.competitors.find(c => c.homeAway === 'home');
         const away = comp.competitors.find(c => c.homeAway === 'away');
-        if (state === 'post') { g.status = 'closed'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; }
-        else if (state === 'in') { g.status = 'inprogress'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; }
-        else { g.status = 'scheduled'; }
+        if (state === 'post') { g.status = 'closed'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; g.liveDetail = null; }
+        else if (state === 'in') { g.status = 'inprogress'; g.score = { [g.home]: Number(home.score), [g.away]: Number(away.score) }; g.liveDetail = match.status?.type?.shortDetail || null; }
+        else { g.status = 'scheduled'; g.liveDetail = null; }
       });
     } catch (e) { /* live check best-effort; ignore failures for this sport */ }
   }
@@ -442,8 +443,8 @@ function renderSetup() {
   return wrap;
 }
 
-function statusInfo(status) {
-  if (status === 'inprogress') return { text: 'Live', live: true };
+function statusInfo(status, liveDetail) {
+  if (status === 'inprogress') return { text: liveDetail || 'Live', live: true };
   if (status === 'closed' || status === 'complete') return { text: 'Final', live: false };
   return { text: 'Upcoming', live: false };
 }
@@ -467,24 +468,25 @@ function renderGames() {
     return wrap;
   }
 
-  const games = (DATA[activeSport] || []).filter(g => new Date(g.start) > new Date() && g.status === 'scheduled');
+  const games = DATA[activeSport] || [];
   const list = el('div');
   if (!games.length) {
-    list.appendChild(el('div', 'empty', 'No upcoming ' + meta.label + ' games in this snapshot right now.'));
+    list.appendChild(el('div', 'empty', 'No ' + meta.label + ' games in this snapshot right now.'));
   } else {
     games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
   }
   wrap.appendChild(list);
-  wrap.appendChild(el('div', 'refresh-note', 'Game list is a snapshot from ' + SNAPSHOT_TIME + ' (spreads are modeled from win-probability data, not live sportsbook lines), but scores and final results are checked live from ESPN and update automatically as games finish.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Game list is a snapshot from ' + SNAPSHOT_TIME + ' (spreads are modeled from win-probability data, not live sportsbook lines), but scores and game state are checked live from ESPN and update automatically.'));
   return wrap;
 }
 
 function myPickFor(gameId) { return allPicks.find(p => p.gameId === gameId && p.player === profile.name); }
 
 function renderGameCard(g, sport, meta) {
-  const st = statusInfo(g.status);
+  const st = statusInfo(g.status, g.liveDetail);
   const home = g.teams[g.home], away = g.teams[g.away];
   const completed = st.text === 'Final';
+  const inProgress = g.status === 'inprogress';
   const homeScore = g.score ? g.score[g.home] : undefined;
   const awayScore = g.score ? g.score[g.away] : undefined;
   const homeWon = completed && homeScore > awayScore;
@@ -516,6 +518,10 @@ function renderGameCard(g, sport, meta) {
   }
   if (completed) {
     card.appendChild(el('div', 'no-odds-note', 'Game already final — no pick placed'));
+    return card;
+  }
+  if (inProgress) {
+    card.appendChild(el('div', 'no-odds-note', 'Game already in progress — betting closed'));
     return card;
   }
 
@@ -655,7 +661,8 @@ function renderMyPicks() {
       const r = settlePick(p);
       const row = el('div', 'pick-row');
       const left = el('div');
-      left.appendChild(el('div', 'who', p.gameLabel));
+      const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || p.sport.toUpperCase();
+      left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}`));
       left.appendChild(el('div', 'detail', `${p.sideAbbr} · ${p.units}u risked`));
       row.appendChild(left);
       let resultHtml = '', cls = 'pending';
