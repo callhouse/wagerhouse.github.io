@@ -237,6 +237,9 @@ let players = [];
 let activeTab = 'games';
 let activeSport = 'nfl';
 let selectedSide = {};
+let picksLeagueFilter = null; // null = show all leagues; else Set of sport ids
+let picksSortMode = 'date_desc';
+let picksCollapsed = { active: false, future: false, past: false };
 let setupError = '';
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -655,9 +658,22 @@ async function clearOrphanedPicks() {
   }
 }
 
+function pickDate(p) {
+  const idx = gameIndex[p.gameId];
+  return idx ? new Date(idx.game.start) : new Date(p.timestamp);
+}
+function sortPicks(list, mode) {
+  const arr = list.slice();
+  if (mode === 'date_desc') arr.sort((a,b) => pickDate(b) - pickDate(a));
+  else if (mode === 'date_asc') arr.sort((a,b) => pickDate(a) - pickDate(b));
+  else if (mode === 'units_desc') arr.sort((a,b) => b.units - a.units);
+  else if (mode === 'units_asc') arr.sort((a,b) => a.units - b.units);
+  return arr;
+}
+
 function renderMyPicks() {
   const wrap = el('div');
-  const mine = allPicks.filter(p => p.player === profile.name);
+  let mine = allPicks.filter(p => p.player === profile.name);
 
   const orphanedCount = allPicks.filter(isOrphaned).length;
   if (orphanedCount > 0) {
@@ -695,6 +711,43 @@ function renderMyPicks() {
     return wrap;
   }
 
+  // league filter chips — only show leagues the user actually has bets in
+  const leaguesPresent = [...new Set(mine.map(p => p.sport))];
+  if (picksLeagueFilter === null) picksLeagueFilter = new Set(leaguesPresent);
+  const scroller = el('div', 'league-scroller');
+  const allPill = el('button', 'league-pill' + (picksLeagueFilter.size === leaguesPresent.length ? ' active' : ''), 'All');
+  allPill.onclick = () => { picksLeagueFilter = new Set(leaguesPresent); render(); };
+  scroller.appendChild(allPill);
+  leaguesPresent.forEach(sport => {
+    const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+    const pill = el('button', 'league-pill' + (picksLeagueFilter.has(sport) ? ' active' : ''), label);
+    pill.onclick = () => {
+      if (picksLeagueFilter.has(sport)) picksLeagueFilter.delete(sport); else picksLeagueFilter.add(sport);
+      if (picksLeagueFilter.size === 0) picksLeagueFilter = new Set(leaguesPresent);
+      render();
+    };
+    scroller.appendChild(pill);
+  });
+  wrap.appendChild(scroller);
+
+  // sort control
+  const sortRow = el('div');
+  sortRow.style.cssText = 'display:flex;align-items:center;gap:8px;padding:0 2px 10px;';
+  sortRow.appendChild(el('label', null, 'Sort'));
+  sortRow.querySelector('label').style.cssText = 'font-size:11.5px;color:var(--text-dim);font-weight:600;';
+  const sortSelect = el('select');
+  sortSelect.style.cssText = 'flex:1;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:7px 8px;font-size:13px;';
+  [['date_desc','Newest first'], ['date_asc','Oldest first'], ['units_desc','Units: high to low'], ['units_asc','Units: low to high']].forEach(([val,label]) => {
+    const opt = document.createElement('option'); opt.value = val; opt.textContent = label;
+    if (val === picksSortMode) opt.selected = true;
+    sortSelect.appendChild(opt);
+  });
+  sortSelect.onchange = () => { picksSortMode = sortSelect.value; render(); };
+  sortRow.appendChild(sortSelect);
+  wrap.appendChild(sortRow);
+
+  mine = mine.filter(p => picksLeagueFilter.has(p.sport));
+
   function gameStatusFor(p) {
     const idx = gameIndex[p.gameId];
     return idx ? idx.game.status : 'scheduled';
@@ -706,24 +759,29 @@ function renderMyPicks() {
     else if (st === 'closed' || st === 'complete') groups.past.push(p);
     else groups.future.push(p);
   });
-  groups.active.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-  groups.future.sort((a,b) => {
-    const ga = gameIndex[a.gameId], gb = gameIndex[b.gameId];
-    return (ga ? new Date(ga.game.start) : 0) - (gb ? new Date(gb.game.start) : 0);
-  });
-  groups.past.sort((a,b) => {
-    const ga = gameIndex[a.gameId], gb = gameIndex[b.gameId];
-    return (gb ? new Date(gb.game.start) : 0) - (ga ? new Date(ga.game.start) : 0);
-  });
 
   [['active','Active'], ['future','Upcoming'], ['past','Settled']].forEach(([key,label]) => {
-    const list = groups[key];
-    wrap.appendChild(el('div', 'week-header', label + ' (' + list.length + ')'));
+    const list = sortPicks(groups[key], picksSortMode);
+    const header = el('div', 'week-header', (picksCollapsed[key] ? '▸ ' : '▾ ') + label + ' (' + list.length + ')');
+    header.style.cursor = 'pointer';
+    header.onclick = () => { picksCollapsed[key] = !picksCollapsed[key]; render(); };
+    wrap.appendChild(header);
+    if (picksCollapsed[key]) return;
     if (!list.length) {
       wrap.appendChild(el('div', 'empty', 'Nothing here yet.'));
-    } else {
-      list.forEach(p => wrap.appendChild(renderPickRow(p)));
+      return;
     }
+    const byLeague = {};
+    list.forEach(p => { (byLeague[p.sport] = byLeague[p.sport] || []).push(p); });
+    Object.keys(byLeague).forEach(sport => {
+      const leagueLabel = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+      if (Object.keys(byLeague).length > 1) {
+        const sub = el('div', null, leagueLabel);
+        sub.style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;margin:8px 2px 0;font-weight:700;';
+        wrap.appendChild(sub);
+      }
+      byLeague[sport].forEach(p => wrap.appendChild(renderPickRow(p)));
+    });
   });
   return wrap;
 }
