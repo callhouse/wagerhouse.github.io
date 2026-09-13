@@ -505,17 +505,23 @@ function myDailyPickFor(gameId) {
 }
 function todaysLineGames() {
   const todayStr = todayKey();
+  const doneIds = new Set((allPicks.filter(p => p.player === profile?.name && p.poolType === 'lines' && p.dayKey === todayStr)).map(p => p.gameId));
   const candidates = [];
+  const seen = new Set();
   LEAGUES_META.filter(l => l.active).forEach(lg => {
     (DATA[lg.id] || []).forEach(g => {
-      if (g.status === 'scheduled' && new Date(g.start).toDateString() === todayStr) {
-        const sp = computeSpread(lg.id, g);
-        if (sp !== null) candidates.push({ sport: lg.id, game: g });
-      }
+      if (new Date(g.start).toDateString() !== todayStr) return;
+      if (seen.has(g.id)) return;
+      const alreadyGuessed = doneIds.has(g.id);
+      const eligibleNow = g.status === 'scheduled' && computeSpread(lg.id, g) !== null;
+      if (alreadyGuessed || eligibleNow) { seen.add(g.id); candidates.push({ sport: lg.id, game: g }); }
     });
   });
   candidates.sort((a,b) => new Date(a.game.start) - new Date(b.game.start));
-  return candidates.slice(0, 5);
+  if (doneIds.size === 0) return candidates.slice(0, 5);
+  const guessedOnes = candidates.filter(c => doneIds.has(c.game.id));
+  const newOnes = candidates.filter(c => !doneIds.has(c.game.id)).slice(0, Math.max(0, 5 - guessedOnes.length));
+  return [...guessedOnes, ...newOnes].sort((a,b) => new Date(a.game.start) - new Date(b.game.start));
 }
 function linesGuessesToday(name) {
   return allPicks.filter(p => p.player === name && p.poolType === 'lines' && p.dayKey === todayKey());
@@ -524,6 +530,49 @@ function linesCompletedToday(name) {
   const needed = todaysLineGames().length;
   if (needed === 0) return true;
   return linesGuessesToday(name).length >= needed;
+}
+function bestWinnersDayEver() {
+  const groups = {};
+  allPicks.filter(p => p.poolType === 'daily').forEach(p => {
+    const key = p.player + '|' + p.dayKey;
+    (groups[key] = groups[key] || []).push(p);
+  });
+  let best = null;
+  Object.keys(groups).forEach(key => {
+    const settled = groups[key].map(p => settlePick(p));
+    const net = settled.reduce((s,r) => s + (r.status === 'win' || r.status === 'loss' ? r.profit : 0), 0);
+    const [player, day] = key.split('|');
+    if (net > 0 && (best === null || net > best.net)) best = { player, day, net };
+  });
+  return best;
+}
+function bestLinesDayEver() {
+  const groups = {};
+  allPicks.filter(p => p.poolType === 'lines').forEach(p => {
+    const key = p.player + '|' + p.dayKey;
+    (groups[key] = groups[key] || []).push(p);
+  });
+  let best = null;
+  Object.keys(groups).forEach(key => {
+    const guesses = groups[key];
+    const valid = guesses.filter(g => g.actualSpreadAtSubmit !== null && g.actualSpreadAtSubmit !== undefined);
+    if (!valid.length) return;
+    const total = valid.reduce((s,g) => s + Math.abs(g.guess - g.actualSpreadAtSubmit), 0);
+    const [player, day] = key.split('|');
+    if (best === null || total < best.total) best = { player, day, total, games: valid.length };
+  });
+  return best;
+}
+function renderBestBanner(best, kind) {
+  if (!best) return el('div', 'setup-hint', kind === 'winners' ? 'No completed daily rounds yet — be the first!' : 'No completed lines rounds yet — be the first!');
+  const dayLabel = new Date(best.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const banner = el('div', 'rank-banner');
+  const c = el('div', 'rank-cell');
+  c.appendChild(el('div', 'rc-label', 'Best ever'));
+  c.appendChild(el('div', 'rc-value accent', kind === 'winners' ? fmtUnits(best.net) : best.total.toFixed(1) + ' pts off'));
+  c.appendChild(el('div', 'rc-sub', best.player + ' · ' + dayLabel));
+  banner.appendChild(c);
+  return banner;
 }
 
 // shared unit-bar (used by today's-progress and by history)
@@ -592,6 +641,8 @@ function renderDailyChooser() {
 // ---------- Daily Challenge: Pick Winners ----------
 function renderDailyWinners() {
   const wrap = el('div');
+  wrap.appendChild(renderBestBanner(bestWinnersDayEver(), 'winners'));
+
   const used = dailyUnitsUsed(profile.name);
   const remaining = Math.max(0, DAILY_BUDGET - used);
 
@@ -802,21 +853,25 @@ function guessLabel(value, homeAbbr, awayAbbr) {
 }
 function renderDailyLines() {
   const wrap = el('div');
+  wrap.appendChild(renderBestBanner(bestLinesDayEver(), 'lines'));
+
   const games = todaysLineGames();
   const doneToday = linesGuessesToday(profile.name);
+  const doneIds = new Set(doneToday.map(p => p.gameId));
+  const remainingGames = games.filter(({ game }) => !doneIds.has(game.id));
 
   if (!games.length) {
     wrap.appendChild(el('div', 'empty', 'No games with a posted line today — check back later.'));
     return wrap;
   }
-  if (doneToday.length >= games.length) {
+  if (remainingGames.length === 0) {
     wrap.appendChild(renderLinesResults(doneToday));
     return wrap;
   }
 
-  wrap.appendChild(el('div', 'setup-hint', `Slide toward the team you think is favored, and by how much. Submit all ${games.length} to see how close you were.`));
+  wrap.appendChild(el('div', 'setup-hint', `Slide toward the team you think is favored, and by how much. Submit all ${remainingGames.length} to see how close you were. Each game can only be guessed once.`));
 
-  games.forEach(({ sport, game }) => {
+  remainingGames.forEach(({ sport, game }) => {
     if (dailyLinesGuesses[game.id] === undefined) dailyLinesGuesses[game.id] = 0;
     const card = el('div', 'event-card');
     const timeStr = new Date(game.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -845,12 +900,12 @@ function renderDailyLines() {
     wrap.appendChild(card);
   });
 
-  const submitBtn = el('button', 'lock-btn', `Submit all ${games.length} picks`);
+  const submitBtn = el('button', 'lock-btn', `Submit all ${remainingGames.length} picks`);
   submitBtn.style.marginTop = '8px';
   const errEl = el('div', 'pick-error');
   submitBtn.onclick = async () => {
     errEl.textContent = '';
-    const newGuesses = games.map(({ sport, game }) => ({
+    const newGuesses = remainingGames.map(({ sport, game }) => ({
       id: profile.name + '_line_' + game.id + '_' + Date.now() + Math.random().toString(36).slice(2, 6),
       player: profile.name, sport, gameId: game.id,
       gameLabel: game.away + ' @ ' + game.home,
@@ -868,7 +923,7 @@ function renderDailyLines() {
       render();
     } catch (e) {
       allPicks.length = prevLen;
-      submitBtn.disabled = false; submitBtn.textContent = `Submit all ${games.length} picks`;
+      submitBtn.disabled = false; submitBtn.textContent = `Submit all ${remainingGames.length} picks`;
       errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
     }
   };
@@ -945,19 +1000,19 @@ function renderGames() {
     return wrap;
   }
 
-  const games = DATA[activeSport] || [];
+  const games = (DATA[activeSport] || []).filter(g => g.status === 'scheduled');
   const list = el('div');
   if (!games.length) {
-    list.appendChild(el('div', 'empty', gamesLoaded ? ('No ' + meta.label + ' games found for today/tomorrow.') : 'Loading games…'));
+    list.appendChild(el('div', 'empty', gamesLoaded ? ('No upcoming ' + meta.label + ' games found for today/tomorrow.') : 'Loading games…'));
   } else {
     games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
   }
   wrap.appendChild(list);
-  wrap.appendChild(el('div', 'refresh-note', 'Games, scores, and spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard and refresh automatically. Some smaller matchups won\'t have a posted spread — those show moneyline only.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Only games that haven\'t started yet are shown here. Spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard. Some smaller matchups won\'t have a posted spread — those show moneyline only.'));
   return wrap;
 }
 
-function myPickFor(gameId) { return allPicks.find(p => p.gameId === gameId && p.player === profile.name); }
+function myPickFor(gameId) { return allPicks.find(p => p.gameId === gameId && p.player === profile.name && !p.poolType); }
 
 function renderGameCard(g, sport, meta) {
   const st = statusInfo(g.status, g.liveDetail);
