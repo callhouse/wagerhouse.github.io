@@ -132,6 +132,7 @@
       <h1>Wager<span>Wire</span></h1>
       <span class="who" id="whoLabel"></span>
     </div>
+    <div class="tabbar" id="sectionSwitch"></div>
     <div class="tabbar" id="tabbar"></div>
   </header>
   <main id="main"></main>
@@ -240,6 +241,12 @@ let selectedSide = {};
 let picksLeagueFilter = null; // null = show all leagues; else Set of sport ids
 let picksSortMode = 'date_desc';
 let picksCollapsed = { active: false, future: false, past: false };
+let lbDateMode = 'all'; // 'day' | 'week' | 'year' | 'all'
+let lbLeagueFilter = null; // null = all leagues; else Set of sport ids
+let appSection = 'daily'; // 'daily' | 'pools'
+let dailyActiveSport = null; // null = show league cards; else drill into that sport's today games
+let dailySelectedSide = {};
+const DAILY_BUDGET = 10;
 let setupError = '';
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -254,6 +261,14 @@ function mondayOf(d) {
 }
 function weekLabel(d) { return 'Week of ' + mondayOf(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 function weekKey(d) { return mondayOf(d).toISOString().slice(0,10); }
+function inDateRange(date, mode) {
+  if (mode === 'all') return true;
+  const now = new Date();
+  if (mode === 'day') return date.toDateString() === now.toDateString();
+  if (mode === 'week') return weekKey(date) === weekKey(now);
+  if (mode === 'year') return date.getFullYear() === now.getFullYear();
+  return true;
+}
 
 // ---------- spread from real ESPN posted line (payout is flat 1:1, no odds weighting) ----------
 function fmtUnits(n) {
@@ -380,15 +395,32 @@ function startPolling() {
 function render() {
   const scrollY = window.scrollY;
   document.getElementById('whoLabel').textContent = profile ? profile.name : '';
-  renderTabs();
+  renderSectionSwitch();
   const main = document.getElementById('main');
   main.innerHTML = '';
-  if (!profile) { main.appendChild(renderSetup()); return; }
-  if (activeTab === 'games') main.appendChild(renderGames());
-  else if (activeTab === 'picks') main.appendChild(renderMyPicks());
-  else if (activeTab === 'stats') main.appendChild(renderStats());
-  else if (activeTab === 'board') main.appendChild(renderLeaderboard());
+  if (!profile) { document.getElementById('tabbar').innerHTML = ''; main.appendChild(renderSetup()); window.scrollTo(0, scrollY); return; }
+  if (appSection === 'daily') {
+    document.getElementById('tabbar').innerHTML = '';
+    main.appendChild(renderDailyChallenge());
+  } else {
+    renderTabs();
+    if (activeTab === 'games') main.appendChild(renderGames());
+    else if (activeTab === 'picks') main.appendChild(renderMyPicks());
+    else if (activeTab === 'stats') main.appendChild(renderStats());
+    else if (activeTab === 'board') main.appendChild(renderLeaderboard());
+  }
   window.scrollTo(0, scrollY);
+}
+
+function renderSectionSwitch() {
+  const bar = document.getElementById('sectionSwitch');
+  bar.innerHTML = '';
+  if (!profile) return;
+  [['daily','Daily Challenge'],['pools','Pools']].forEach(([id,label]) => {
+    const t = el('div', 'tab' + (appSection === id ? ' active' : ''), label);
+    t.onclick = () => { appSection = id; render(); };
+    bar.appendChild(t);
+  });
 }
 
 function renderTabs() {
@@ -443,6 +475,172 @@ function statusInfo(status, liveDetail) {
   if (status === 'inprogress') return { text: liveDetail || 'Live', live: true };
   if (status === 'closed' || status === 'complete') return { text: 'Final', live: false };
   return { text: 'Upcoming', live: false };
+}
+
+// ---------- Daily Challenge ----------
+function todayKey() { return new Date().toDateString(); }
+function dailyPicksForToday(name) {
+  return allPicks.filter(p => p.player === name && p.poolType === 'daily' && p.dayKey === todayKey());
+}
+function dailyUnitsUsed(name) {
+  return dailyPicksForToday(name).reduce((s, p) => s + p.units, 0);
+}
+function myDailyPickFor(gameId) {
+  return allPicks.find(p => p.gameId === gameId && p.player === profile.name && p.poolType === 'daily' && p.dayKey === todayKey());
+}
+
+function renderDailyChallenge() {
+  const wrap = el('div');
+  const used = dailyUnitsUsed(profile.name);
+  const remaining = Math.max(0, DAILY_BUDGET - used);
+
+  const budgetCard = el('div', 'rank-banner');
+  const b1 = el('div', 'rank-cell');
+  b1.appendChild(el('div', 'rc-label', 'Daily budget left'));
+  b1.appendChild(el('div', 'rc-value accent', remaining.toFixed(1) + 'u'));
+  b1.appendChild(el('div', 'rc-sub', used.toFixed(1) + ' of ' + DAILY_BUDGET + 'u used today'));
+  budgetCard.appendChild(b1);
+  wrap.appendChild(budgetCard);
+
+  if (dailyActiveSport) {
+    wrap.appendChild(renderDailyLeagueDetail(dailyActiveSport, remaining));
+    return wrap;
+  }
+
+  const todayStr = todayKey();
+  const activeLeagues = LEAGUES_META.filter(l => l.active);
+  activeLeagues.forEach(lg => {
+    const games = (DATA[lg.id] || []).filter(g => g.status === 'scheduled' && new Date(g.start).toDateString() === todayStr);
+    const card = el('div', 'event-card');
+    card.style.padding = '18px';
+    const hasGames = games.length > 0;
+    card.style.opacity = hasGames ? '1' : '0.5';
+    card.style.cursor = hasGames ? 'pointer' : 'default';
+    card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:18px;font-weight:800;">${lg.label}</div>
+      <div style="font-size:13px;color:var(--text-dim);font-family:var(--font-mono);">${games.length} game${games.length === 1 ? '' : 's'} today</div>
+    </div>`;
+    if (hasGames) card.onclick = () => { dailyActiveSport = lg.id; render(); };
+    wrap.appendChild(card);
+  });
+  LEAGUES_META.filter(l => !l.active).forEach(lg => {
+    const card = el('div', 'offseason-card');
+    card.style.padding = '20px';
+    card.innerHTML = `<div class="big" style="font-size:14px;">${lg.label}</div><div class="small">We'll be back ${lg.returns}</div>`;
+    wrap.appendChild(card);
+  });
+  wrap.appendChild(el('div', 'refresh-note', `One quick round a day: ${DAILY_BUDGET} units to split however you want across today's games. Budget resets at midnight, your time.`));
+  return wrap;
+}
+
+function renderDailyLeagueDetail(sport, remaining) {
+  const wrap = el('div');
+  const backRow = el('div');
+  const backBtn = el('button', null, '← All leagues');
+  backBtn.style.cssText = 'background:none;border:none;color:var(--accent);font-size:13px;font-weight:700;padding:10px 0;';
+  backBtn.onclick = () => { dailyActiveSport = null; render(); };
+  backRow.appendChild(backBtn);
+  wrap.appendChild(backRow);
+
+  const todayStr = todayKey();
+  const games = (DATA[sport] || []).filter(g => g.status === 'scheduled' && new Date(g.start).toDateString() === todayStr);
+  if (!games.length) {
+    wrap.appendChild(el('div', 'empty', 'No games left today.'));
+    return wrap;
+  }
+  games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => wrap.appendChild(renderDailyGameCard(g, sport, remaining)));
+  return wrap;
+}
+
+function renderDailyGameCard(g, sport, remaining) {
+  const card = el('div', 'event-card');
+  const spread = computeSpread(sport, g);
+  const timeStr = new Date(g.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  card.appendChild(el('div', 'event-meta', g.title || timeStr));
+
+  const existing = myDailyPickFor(g.id);
+  if (existing) {
+    const note = el('div', 'locked-note');
+    note.appendChild(el('div', 'ln-title', 'Your pick'));
+    note.innerHTML += `${existing.sideAbbr} · <b>${existing.units}u</b> risked`;
+    card.appendChild(note);
+    return card;
+  }
+
+  [{ ab: g.away, t: g.teams[g.away] }, { ab: g.home, t: g.teams[g.home] }].forEach(row => {
+    card.appendChild(el('div', 'team-row', `<span class="team-name">${row.t.name}</span>`));
+  });
+
+  if (remaining <= 0) {
+    card.appendChild(el('div', 'no-odds-note', "Today's budget is spent — come back tomorrow"));
+    return card;
+  }
+
+  const grid = el('div', 'outcome-grid');
+  let lockBtn;
+  [g.away, g.home].forEach(ab => {
+    const btn = el('div', 'outcome-btn' + (dailySelectedSide[g.id] === ab ? ' selected' : ''));
+    let label = 'ML';
+    if (spread !== null) {
+      const val = ab === g.home ? spread : -spread;
+      label = val === 0 ? 'PK' : (val > 0 ? '+' + val : val.toString());
+    }
+    btn.innerHTML = `<div class="oc-team">${ab}</div><div class="oc-line">${label}</div>`;
+    btn.onclick = () => {
+      dailySelectedSide[g.id] = ab;
+      grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      lockBtn.disabled = false;
+      lockBtn.textContent = 'Lock pick: ' + ab;
+    };
+    grid.appendChild(btn);
+  });
+  card.appendChild(grid);
+
+  const slip = el('div', 'bet-slip');
+  const bsRow = el('div', 'bs-row');
+  bsRow.appendChild(el('label', null, 'Units'));
+  const unitsInput = el('input');
+  unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.max = String(remaining);
+  unitsInput.value = String(Math.min(2, remaining));
+  bsRow.appendChild(unitsInput);
+  slip.appendChild(bsRow);
+  lockBtn = el('button', 'lock-btn', 'Select a side');
+  lockBtn.disabled = true;
+  slip.appendChild(lockBtn);
+  const errEl = el('div', 'pick-error');
+  slip.appendChild(errEl);
+  card.appendChild(slip);
+
+  lockBtn.onclick = async () => {
+    const ab = dailySelectedSide[g.id];
+    const units = parseFloat(unitsInput.value);
+    errEl.textContent = '';
+    if (!ab) { errEl.textContent = 'Pick a side first.'; return; }
+    if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
+    if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left today.`; return; }
+    const pick = {
+      id: profile.name + '_daily_' + g.id + '_' + Date.now(),
+      player: profile.name, sport, gameId: g.id,
+      gameLabel: g.away + ' @ ' + g.home,
+      sideAbbr: ab, units,
+      poolType: 'daily', dayKey: todayKey(),
+      week: weekKey(new Date(g.start)), weekLabel: weekLabel(new Date(g.start)),
+      timestamp: new Date().toISOString()
+    };
+    lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
+    allPicks.push(pick);
+    try {
+      await savePicks(allPicks);
+      render();
+    } catch (e) {
+      allPicks.pop();
+      lockBtn.disabled = false; lockBtn.textContent = 'Lock pick: ' + ab;
+      errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
+    }
+  };
+
+  return card;
 }
 
 function renderGames() {
@@ -604,15 +802,16 @@ function settlePick(p) {
 }
 function potentialWin(p) { return p.units; }
 
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily'); }
 function currentProfit(name) {
-  return allPicks.filter(p => p.player === name).reduce((s,p) => {
+  return poolOnly(allPicks.filter(p => p.player === name)).reduce((s,p) => {
     const r = settlePick(p);
     if (r.status === 'win' || r.status === 'loss') return s + r.profit;
     return s;
   }, 0);
 }
 function potentialProfit(name) {
-  return allPicks.filter(p => p.player === name).reduce((s,p) => {
+  return poolOnly(allPicks.filter(p => p.player === name)).reduce((s,p) => {
     const r = settlePick(p);
     if (r.status === 'win' || r.status === 'loss') return s + r.profit;
     if (r.status === 'pending') return s + potentialWin(p);
@@ -673,7 +872,7 @@ function sortPicks(list, mode) {
 
 function renderMyPicks() {
   const wrap = el('div');
-  let mine = allPicks.filter(p => p.player === profile.name);
+  let mine = poolOnly(allPicks.filter(p => p.player === profile.name));
 
   const orphanedCount = allPicks.filter(isOrphaned).length;
   if (orphanedCount > 0) {
@@ -815,7 +1014,7 @@ function renderPickRow(p) {
 
 // ---------- stats analytics ----------
 function settledPicksSorted(name) {
-  return allPicks.filter(p => p.player === name)
+  return poolOnly(allPicks.filter(p => p.player === name))
     .map(p => ({ p, r: settlePick(p), start: gameIndex[p.gameId] ? new Date(gameIndex[p.gameId].game.start) : new Date(p.timestamp) }))
     .filter(x => x.r.status === 'win' || x.r.status === 'loss')
     .sort((a, b) => a.start - b.start);
@@ -868,9 +1067,61 @@ function leagueBarsSVG(rows) {
   </svg>`;
 }
 
+// ---------- badges ----------
+const BADGES = [
+  { id: 'first_win', icon: '🏆', label: 'First Blood', desc: 'Win your first bet',
+    check: (settled) => settled.some(x => x.r.status === 'win') },
+  { id: 'perfect_week', icon: '💯', label: 'Perfect Week', desc: 'Go undefeated in a week (2+ bets)',
+    check: (settled) => {
+      const byWeek = {};
+      settled.forEach(x => { const wk = weekKey(x.start); (byWeek[wk] = byWeek[wk] || []).push(x); });
+      return Object.values(byWeek).some(list => list.length >= 2 && list.every(x => x.r.status === 'win'));
+    } },
+  { id: 'hot_streak', icon: '🔥', label: 'Hot Streak', desc: 'Win 3 bets in a row',
+    check: (settled) => {
+      let streak = 0, best = 0;
+      settled.forEach(x => { if (x.r.status === 'win') { streak++; best = Math.max(best, streak); } else streak = 0; });
+      return best >= 3;
+    } },
+  { id: 'iron_stomach', icon: '💪', label: 'Iron Stomach', desc: 'Risk 5+ units on a single bet',
+    check: (settled, mine) => mine.some(p => p.units >= 5) },
+  { id: 'diversifier', icon: '🎲', label: 'Diversifier', desc: 'Bet on 3+ leagues in the same week',
+    check: (settled, mine) => {
+      const byWeek = {};
+      mine.forEach(p => { (byWeek[p.week] = byWeek[p.week] || new Set()).add(p.sport); });
+      return Object.values(byWeek).some(s => s.size >= 3);
+    } },
+  { id: 'big_week', icon: '📈', label: 'Big Week', desc: 'Net +5 units in a single week',
+    check: (settled) => {
+      const byWeek = {};
+      settled.forEach(x => { const wk = weekKey(x.start); byWeek[wk] = (byWeek[wk] || 0) + x.r.profit; });
+      return Object.values(byWeek).some(v => v >= 5);
+    } },
+  { id: 'century', icon: '💰', label: 'Century Club', desc: 'Reach +10 net units lifetime',
+    check: (settled) => settled.reduce((s, x) => s + x.r.profit, 0) >= 10 },
+  { id: 'grinder', icon: '⛏️', label: 'Grinder', desc: 'Place 25 total bets',
+    check: (settled, mine) => mine.length >= 25 },
+];
+function renderBadges(settled, mine) {
+  const grid = el('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,1fr);gap:8px;';
+  BADGES.forEach(b => {
+    const earned = b.check(settled, mine);
+    const tile = el('div');
+    tile.style.cssText = `background:${earned ? 'var(--accent-dark)' : 'var(--surface)'};border:1px solid ${earned ? 'var(--accent)' : 'var(--border)'};border-radius:10px;padding:12px 10px;text-align:center;${earned ? '' : 'opacity:0.5;'}`;
+    tile.innerHTML = `<div style="font-size:26px;line-height:1;">${b.icon}</div><div style="font-size:12px;font-weight:800;margin-top:6px;color:${earned ? 'var(--accent)' : 'var(--text-dim)'};">${b.label}</div><div style="font-size:10.5px;color:var(--text-faint);margin-top:3px;">${b.desc}</div>`;
+    grid.appendChild(tile);
+  });
+  return grid;
+}
+
 function renderStats() {
   const wrap = el('div');
   const entries = settledPicksSorted(profile.name);
+  const mine = poolOnly(allPicks.filter(p => p.player === profile.name));
+
+  wrap.appendChild(el('div', 'week-header', 'Badges'));
+  wrap.appendChild(renderBadges(entries, mine));
 
   if (!entries.length) {
     wrap.appendChild(el('div', 'empty', 'No settled bets yet — stats will fill in once games finish.'));
@@ -937,21 +1188,59 @@ function renderStats() {
   return wrap;
 }
 
+function filteredSettledFor(name, dateMode, leagueSet) {
+  return poolOnly(allPicks.filter(p => p.player === name))
+    .map(p => ({ p, r: settlePick(p), date: gameIndex[p.gameId] ? new Date(gameIndex[p.gameId].game.start) : new Date(p.timestamp) }))
+    .filter(x => x.r.status === 'win' || x.r.status === 'loss')
+    .filter(x => inDateRange(x.date, dateMode))
+    .filter(x => !leagueSet || leagueSet.has(x.p.sport));
+}
+
 function renderLeaderboard() {
   const wrap = el('div');
   const names = players.length ? players.slice() : [];
   if (profile && !names.includes(profile.name)) names.push(profile.name);
-  const records = {};
-  names.forEach(m => { records[m] = { w: 0, l: 0 }; });
-  allPicks.forEach(p => {
-    if (!(p.player in records)) records[p.player] = { w: 0, l: 0 };
-    const r = settlePick(p);
-    if (r.status === 'win') records[p.player].w++;
-    else if (r.status === 'loss') records[p.player].l++;
+
+  // date range chips
+  const dateScroller = el('div', 'league-scroller');
+  [['day','Today'], ['week','This week'], ['year','This year'], ['all','All-time']].forEach(([mode,label]) => {
+    const pill = el('button', 'league-pill' + (lbDateMode === mode ? ' active' : ''), label);
+    pill.onclick = () => { lbDateMode = mode; render(); };
+    dateScroller.appendChild(pill);
   });
-  const ranked = names.map(name => ({ name, profit: currentProfit(name), rec: records[name] })).sort((a,b) => b.profit - a.profit);
-  if (!ranked.length) {
-    wrap.appendChild(el('div', 'empty', 'No picks settled yet.'));
+  wrap.appendChild(dateScroller);
+
+  // league filter chips
+  const leaguesPresent = [...new Set(allPicks.map(p => p.sport))];
+  if (leaguesPresent.length) {
+    if (lbLeagueFilter === null) lbLeagueFilter = new Set(leaguesPresent);
+    const leagueScroller = el('div', 'league-scroller');
+    const allPill = el('button', 'league-pill' + (lbLeagueFilter.size === leaguesPresent.length ? ' active' : ''), 'All leagues');
+    allPill.onclick = () => { lbLeagueFilter = new Set(leaguesPresent); render(); };
+    leagueScroller.appendChild(allPill);
+    leaguesPresent.forEach(sport => {
+      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+      const pill = el('button', 'league-pill' + (lbLeagueFilter.has(sport) ? ' active' : ''), label);
+      pill.onclick = () => {
+        if (lbLeagueFilter.has(sport)) lbLeagueFilter.delete(sport); else lbLeagueFilter.add(sport);
+        if (lbLeagueFilter.size === 0) lbLeagueFilter = new Set(leaguesPresent);
+        render();
+      };
+      leagueScroller.appendChild(pill);
+    });
+    wrap.appendChild(leagueScroller);
+  }
+
+  const activeLeagueSet = leaguesPresent.length ? lbLeagueFilter : null;
+  const ranked = names.map(name => {
+    const entries = filteredSettledFor(name, lbDateMode, activeLeagueSet);
+    const rec = recordFor(entries);
+    return { name, profit: rec.net, rec };
+  }).sort((a,b) => b.profit - a.profit);
+
+  if (!ranked.length || ranked.every(r => r.rec.total === 0)) {
+    wrap.appendChild(el('div', 'empty', 'No settled bets in this range yet.'));
+    wrap.appendChild(el('div', 'refresh-note', 'Payouts are flat 1:1 — win a pick, gain the units risked; lose it, drop the same amount.'));
     return wrap;
   }
   ranked.forEach((r, i) => {
