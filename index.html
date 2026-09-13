@@ -238,14 +238,17 @@ let players = [];
 let activeTab = 'games';
 let activeSport = 'nfl';
 let selectedSide = {};
-let picksLeagueFilter = null; // null = show all leagues; else Set of sport ids
+let picksLeagueFilter = null; // null = show all leagues; else a single sport id
 let picksSortMode = 'date_desc';
 let picksCollapsed = { active: false, future: false, past: false };
 let lbDateMode = 'all'; // 'day' | 'week' | 'year' | 'all'
-let lbLeagueFilter = null; // null = all leagues; else Set of sport ids
+let lbLeagueFilter = null; // null = all leagues; else a single sport id
 let appSection = 'daily'; // 'daily' | 'pools'
 let dailyActiveSport = null; // null = show league cards; else drill into that sport's today games
 let dailySelectedSide = {};
+let dailyScreen = 'chooser'; // 'chooser' | 'winners' | 'lines'
+let dailyWinnersView = 'home'; // 'home' | 'history'
+let dailyLinesGuesses = {}; // gameId -> in-progress slider value, unsaved until submit
 const DAILY_BUDGET = 10;
 let setupError = '';
 
@@ -287,6 +290,18 @@ function computeSpread(sport, g) {
   if (favTeam === (g.home || '').toUpperCase()) return -magnitude;
   if (favTeam === (g.away || '').toUpperCase()) return magnitude;
   return null;
+}
+function spreadLabelForSide(sport, g, ab) {
+  const spread = computeSpread(sport, g);
+  if (spread === null) return null;
+  const val = ab === g.home ? spread : -spread;
+  return val === 0 ? 'PK' : (val > 0 ? '+' + val : val.toString());
+}
+function pickSpreadDisplay(p) {
+  if (p.spreadLabel) return p.spreadLabel;
+  const idx = gameIndex[p.gameId];
+  if (!idx) return null;
+  return spreadLabelForSide(idx.sport, idx.game, p.sideAbbr);
 }
 
 // ---------- Firestore via plain REST (no SDK script needed) ----------
@@ -477,7 +492,7 @@ function statusInfo(status, liveDetail) {
   return { text: 'Upcoming', live: false };
 }
 
-// ---------- Daily Challenge ----------
+// ---------- Daily Challenge shared helpers ----------
 function todayKey() { return new Date().toDateString(); }
 function dailyPicksForToday(name) {
   return allPicks.filter(p => p.player === name && p.poolType === 'daily' && p.dayKey === todayKey());
@@ -488,8 +503,94 @@ function dailyUnitsUsed(name) {
 function myDailyPickFor(gameId) {
   return allPicks.find(p => p.gameId === gameId && p.player === profile.name && p.poolType === 'daily' && p.dayKey === todayKey());
 }
+function todaysLineGames() {
+  const todayStr = todayKey();
+  const candidates = [];
+  LEAGUES_META.filter(l => l.active).forEach(lg => {
+    (DATA[lg.id] || []).forEach(g => {
+      if (g.status === 'scheduled' && new Date(g.start).toDateString() === todayStr) {
+        const sp = computeSpread(lg.id, g);
+        if (sp !== null) candidates.push({ sport: lg.id, game: g });
+      }
+    });
+  });
+  candidates.sort((a,b) => new Date(a.game.start) - new Date(b.game.start));
+  return candidates.slice(0, 5);
+}
+function linesGuessesToday(name) {
+  return allPicks.filter(p => p.player === name && p.poolType === 'lines' && p.dayKey === todayKey());
+}
+function linesCompletedToday(name) {
+  const needed = todaysLineGames().length;
+  if (needed === 0) return true;
+  return linesGuessesToday(name).length >= needed;
+}
 
-function renderDailyChallenge() {
+// shared unit-bar (used by today's-progress and by history)
+function renderDayBar(picks, budget) {
+  const bar = el('div');
+  bar.style.cssText = 'display:flex;height:24px;border-radius:6px;overflow:hidden;background:var(--surface-2);cursor:pointer;';
+  let used = 0;
+  picks.slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(p => {
+    const r = settlePick(p);
+    const color = r.status === 'win' ? 'var(--accent)' : r.status === 'loss' ? 'var(--danger)' : 'var(--gold)';
+    const seg = el('div'); seg.style.cssText = `flex:${p.units} 0 0;background:${color};border-right:1px solid var(--bg);`;
+    bar.appendChild(seg);
+    used += p.units;
+  });
+  const unplaced = Math.max(0, budget - used);
+  if (unplaced > 0) {
+    const seg = el('div'); seg.style.cssText = `flex:${unplaced} 0 0;background:var(--border);`;
+    bar.appendChild(seg);
+  }
+  return bar;
+}
+function renderDayDetailList(picks) {
+  const detail = el('div');
+  detail.style.cssText = 'margin-top:10px;';
+  picks.slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(p => {
+    const r = settlePick(p);
+    const spreadTxt = pickSpreadDisplay(p);
+    const resTxt = r.status === 'win' ? fmtUnits(r.profit) : r.status === 'loss' ? fmtUnits(r.profit) : r.status === 'push' ? 'Push' : 'Pending';
+    const color = r.status === 'win' ? 'var(--accent)' : r.status === 'loss' ? 'var(--danger)' : 'var(--gold)';
+    const line = el('div');
+    line.style.cssText = 'font-size:12px;color:var(--text-dim);padding:7px 2px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;';
+    line.innerHTML = `<span>${p.gameLabel} — ${p.sideAbbr}${spreadTxt ? ' ' + spreadTxt : ''} · ${p.units}u</span><span style="color:${color};font-weight:700;white-space:nowrap;">${resTxt}</span>`;
+    detail.appendChild(line);
+  });
+  return detail;
+}
+function renderExpandableDayBar(picks, budget) {
+  const wrap = el('div');
+  const bar = renderDayBar(picks, budget);
+  const detail = renderDayDetailList(picks);
+  detail.style.display = 'none';
+  bar.onclick = () => { detail.style.display = detail.style.display === 'none' ? 'block' : 'none'; };
+  wrap.appendChild(bar);
+  wrap.appendChild(detail);
+  return wrap;
+}
+
+// ---------- Daily Challenge: chooser ----------
+function renderDailyChooser() {
+  const wrap = el('div');
+  wrap.appendChild(el('div', 'setup-hint', "Two ways to play today — pick winners against the spread, or guess the line yourself before you see it. Takes about 5 minutes."));
+  const winnersBtn = el('div', 'event-card');
+  winnersBtn.style.cssText = 'padding:22px;text-align:center;cursor:pointer;margin-top:6px;';
+  winnersBtn.innerHTML = `<div style="font-size:19px;font-weight:800;">🏈 Pick Winners</div><div style="font-size:12.5px;color:var(--text-dim);margin-top:6px;">Bet up to ${DAILY_BUDGET}u across today's games</div>`;
+  winnersBtn.onclick = () => { dailyScreen = 'winners'; dailyWinnersView = 'home'; render(); };
+  wrap.appendChild(winnersBtn);
+
+  const linesBtn = el('div', 'event-card');
+  linesBtn.style.cssText = 'padding:22px;text-align:center;cursor:pointer;margin-top:10px;';
+  linesBtn.innerHTML = `<div style="font-size:19px;font-weight:800;">🎯 Pick Lines</div><div style="font-size:12.5px;color:var(--text-dim);margin-top:6px;">Guess the spread on 5 games before you see it</div>`;
+  linesBtn.onclick = () => { dailyScreen = 'lines'; render(); };
+  wrap.appendChild(linesBtn);
+  return wrap;
+}
+
+// ---------- Daily Challenge: Pick Winners ----------
+function renderDailyWinners() {
   const wrap = el('div');
   const used = dailyUnitsUsed(profile.name);
   const remaining = Math.max(0, DAILY_BUDGET - used);
@@ -502,14 +603,34 @@ function renderDailyChallenge() {
   budgetCard.appendChild(b1);
   wrap.appendChild(budgetCard);
 
+  const todaysPicks = dailyPicksForToday(profile.name);
+  if (todaysPicks.length) {
+    wrap.appendChild(el('div', 'week-header', "Today's picks (tap to expand)"));
+    wrap.appendChild(renderExpandableDayBar(todaysPicks, DAILY_BUDGET));
+  }
+
+  const historyToggle = el('button', null, dailyWinnersView === 'history' ? '← Back to today' : '📊 View history');
+  historyToggle.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin:14px 0 4px;';
+  historyToggle.onclick = () => { dailyWinnersView = dailyWinnersView === 'history' ? 'home' : 'history'; dailyActiveSport = null; render(); };
+  wrap.appendChild(historyToggle);
+
+  if (dailyWinnersView === 'history') {
+    wrap.appendChild(renderDailyHistory());
+    return wrap;
+  }
+
+  const hideSpread = !linesCompletedToday(profile.name);
+  if (hideSpread) {
+    wrap.appendChild(el('div', 'no-odds-note', "Do today's Pick Lines challenge first to unlock spreads here — for now these show moneyline only."));
+  }
+
   if (dailyActiveSport) {
-    wrap.appendChild(renderDailyLeagueDetail(dailyActiveSport, remaining));
+    wrap.appendChild(renderDailyLeagueDetail(dailyActiveSport, remaining, hideSpread));
     return wrap;
   }
 
   const todayStr = todayKey();
-  const activeLeagues = LEAGUES_META.filter(l => l.active);
-  activeLeagues.forEach(lg => {
+  LEAGUES_META.filter(l => l.active).forEach(lg => {
     const games = (DATA[lg.id] || []).filter(g => g.status === 'scheduled' && new Date(g.start).toDateString() === todayStr);
     const card = el('div', 'event-card');
     card.style.padding = '18px';
@@ -533,7 +654,7 @@ function renderDailyChallenge() {
   return wrap;
 }
 
-function renderDailyLeagueDetail(sport, remaining) {
+function renderDailyLeagueDetail(sport, remaining, hideSpread) {
   const wrap = el('div');
   const backRow = el('div');
   const backBtn = el('button', null, '← All leagues');
@@ -548,11 +669,11 @@ function renderDailyLeagueDetail(sport, remaining) {
     wrap.appendChild(el('div', 'empty', 'No games left today.'));
     return wrap;
   }
-  games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => wrap.appendChild(renderDailyGameCard(g, sport, remaining)));
+  games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => wrap.appendChild(renderDailyGameCard(g, sport, remaining, hideSpread)));
   return wrap;
 }
 
-function renderDailyGameCard(g, sport, remaining) {
+function renderDailyGameCard(g, sport, remaining, hideSpread) {
   const card = el('div', 'event-card');
   const spread = computeSpread(sport, g);
   const timeStr = new Date(g.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -562,7 +683,8 @@ function renderDailyGameCard(g, sport, remaining) {
   if (existing) {
     const note = el('div', 'locked-note');
     note.appendChild(el('div', 'ln-title', 'Your pick'));
-    note.innerHTML += `${existing.sideAbbr} · <b>${existing.units}u</b> risked`;
+    const spreadTxt = pickSpreadDisplay(existing);
+    note.innerHTML += `${existing.sideAbbr}${spreadTxt ? ' ' + spreadTxt : ''} · <b>${existing.units}u</b> risked`;
     card.appendChild(note);
     return card;
   }
@@ -581,7 +703,7 @@ function renderDailyGameCard(g, sport, remaining) {
   [g.away, g.home].forEach(ab => {
     const btn = el('div', 'outcome-btn' + (dailySelectedSide[g.id] === ab ? ' selected' : ''));
     let label = 'ML';
-    if (spread !== null) {
+    if (spread !== null && !hideSpread) {
       const val = ab === g.home ? spread : -spread;
       label = val === 0 ? 'PK' : (val > 0 ? '+' + val : val.toString());
     }
@@ -624,6 +746,7 @@ function renderDailyGameCard(g, sport, remaining) {
       player: profile.name, sport, gameId: g.id,
       gameLabel: g.away + ' @ ' + g.home,
       sideAbbr: ab, units,
+      spreadLabel: spreadLabelForSide(sport, g, ab),
       poolType: 'daily', dayKey: todayKey(),
       week: weekKey(new Date(g.start)), weekLabel: weekLabel(new Date(g.start)),
       timestamp: new Date().toISOString()
@@ -641,6 +764,166 @@ function renderDailyGameCard(g, sport, remaining) {
   };
 
   return card;
+}
+
+function dailyHistoryDays(name) {
+  const mine = allPicks.filter(p => p.player === name && p.poolType === 'daily');
+  const byDay = {};
+  mine.forEach(p => { (byDay[p.dayKey] = byDay[p.dayKey] || []).push(p); });
+  return Object.keys(byDay).sort((a,b) => new Date(b) - new Date(a)).map(day => ({ day, picks: byDay[day] }));
+}
+function renderDailyHistory() {
+  const wrap = el('div');
+  const days = dailyHistoryDays(profile.name);
+  if (!days.length) {
+    wrap.appendChild(el('div', 'empty', 'No daily challenge history yet.'));
+    return wrap;
+  }
+  days.forEach(({ day, picks }) => {
+    const settled = picks.map(p => ({ p, r: settlePick(p) }));
+    const unitsWon = settled.reduce((s,x) => s + (x.r.status === 'win' || x.r.status === 'loss' ? x.r.profit : 0), 0);
+    const card = el('div', 'event-card');
+    const top = el('div');
+    top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;';
+    const dayLabel = new Date(day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    top.innerHTML = `<div style="font-size:14px;font-weight:800;">${dayLabel}</div><div style="font-family:var(--font-mono);font-weight:800;color:${unitsWon > 0 ? 'var(--accent)' : unitsWon < 0 ? 'var(--danger)' : 'var(--text-dim)'};">${fmtUnits(unitsWon)}</div>`;
+    card.appendChild(top);
+    card.appendChild(renderExpandableDayBar(picks, DAILY_BUDGET));
+    wrap.appendChild(card);
+  });
+  return wrap;
+}
+
+// ---------- Daily Challenge: Pick Lines ----------
+function guessLabel(value, homeAbbr, awayAbbr) {
+  if (value === 0) return "Pick'em";
+  const favTeam = value < 0 ? homeAbbr : awayAbbr;
+  return `${favTeam} -${Math.abs(value)}`;
+}
+function renderDailyLines() {
+  const wrap = el('div');
+  const games = todaysLineGames();
+  const doneToday = linesGuessesToday(profile.name);
+
+  if (!games.length) {
+    wrap.appendChild(el('div', 'empty', 'No games with a posted line today — check back later.'));
+    return wrap;
+  }
+  if (doneToday.length >= games.length) {
+    wrap.appendChild(renderLinesResults(doneToday));
+    return wrap;
+  }
+
+  wrap.appendChild(el('div', 'setup-hint', `Slide toward the team you think is favored, and by how much. Submit all ${games.length} to see how close you were.`));
+
+  games.forEach(({ sport, game }) => {
+    if (dailyLinesGuesses[game.id] === undefined) dailyLinesGuesses[game.id] = 0;
+    const card = el('div', 'event-card');
+    const timeStr = new Date(game.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    card.appendChild(el('div', 'event-meta', game.title || timeStr));
+    card.appendChild(el('div', null, `${game.teams[game.away].name} @ ${game.teams[game.home].name}`)).style.cssText = 'font-size:13.5px;font-weight:700;margin:6px 0 10px;';
+
+    const readout = el('div');
+    readout.style.cssText = 'text-align:center;font-family:var(--font-mono);font-size:16px;font-weight:800;color:var(--accent);margin-bottom:6px;';
+    readout.textContent = guessLabel(dailyLinesGuesses[game.id], game.home, game.away);
+    card.appendChild(readout);
+
+    const labelsRow = el('div');
+    labelsRow.style.cssText = 'display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);font-weight:700;margin-bottom:2px;';
+    labelsRow.innerHTML = `<span>${game.home}</span><span>${game.away}</span>`;
+    card.appendChild(labelsRow);
+
+    const slider = el('input');
+    slider.type = 'range'; slider.min = '-20'; slider.max = '20'; slider.step = '0.5'; slider.value = String(dailyLinesGuesses[game.id]);
+    slider.style.cssText = 'width:100%;accent-color:var(--accent);';
+    slider.oninput = () => {
+      const v = parseFloat(slider.value);
+      dailyLinesGuesses[game.id] = v;
+      readout.textContent = guessLabel(v, game.home, game.away);
+    };
+    card.appendChild(slider);
+    wrap.appendChild(card);
+  });
+
+  const submitBtn = el('button', 'lock-btn', `Submit all ${games.length} picks`);
+  submitBtn.style.marginTop = '8px';
+  const errEl = el('div', 'pick-error');
+  submitBtn.onclick = async () => {
+    errEl.textContent = '';
+    const newGuesses = games.map(({ sport, game }) => ({
+      id: profile.name + '_line_' + game.id + '_' + Date.now() + Math.random().toString(36).slice(2, 6),
+      player: profile.name, sport, gameId: game.id,
+      gameLabel: game.away + ' @ ' + game.home,
+      home: game.home, away: game.away,
+      guess: dailyLinesGuesses[game.id] !== undefined ? dailyLinesGuesses[game.id] : 0,
+      actualSpreadAtSubmit: computeSpread(sport, game),
+      poolType: 'lines', dayKey: todayKey(),
+      timestamp: new Date().toISOString()
+    }));
+    submitBtn.disabled = true; submitBtn.textContent = 'Saving…';
+    const prevLen = allPicks.length;
+    newGuesses.forEach(g => allPicks.push(g));
+    try {
+      await savePicks(allPicks);
+      render();
+    } catch (e) {
+      allPicks.length = prevLen;
+      submitBtn.disabled = false; submitBtn.textContent = `Submit all ${games.length} picks`;
+      errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
+    }
+  };
+  wrap.appendChild(submitBtn);
+  wrap.appendChild(errEl);
+  return wrap;
+}
+
+function renderLinesResults(guesses) {
+  const wrap = el('div');
+  let total = 0;
+  const cards = [];
+  guesses.forEach(gu => {
+    const actual = gu.actualSpreadAtSubmit;
+    const diff = (actual === null || actual === undefined) ? null : Math.abs(gu.guess - actual);
+    if (diff !== null) total += diff;
+    const card = el('div', 'event-card');
+    const yourTxt = guessLabel(gu.guess, gu.home, gu.away);
+    const actualTxt = (actual === null || actual === undefined) ? 'no line' : guessLabel(actual, gu.home, gu.away);
+    card.innerHTML = `<div class="event-meta">${gu.gameLabel}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;font-family:var(--font-mono);font-size:13px;">
+        <span>You: ${yourTxt}</span><span>Actual: ${actualTxt}</span>
+      </div>
+      <div style="text-align:right;margin-top:8px;color:var(--accent);font-weight:800;font-family:var(--font-mono);">${diff === null ? '—' : diff.toFixed(1) + ' pts off'}</div>`;
+    cards.push(card);
+  });
+  const totalCard = el('div', 'rank-banner');
+  const c1 = el('div', 'rank-cell');
+  c1.appendChild(el('div', 'rc-label', 'Total points off'));
+  c1.appendChild(el('div', 'rc-value accent', total.toFixed(1)));
+  c1.appendChild(el('div', 'rc-sub', guesses.length + ' games — lower is better'));
+  totalCard.appendChild(c1);
+  wrap.appendChild(totalCard);
+  cards.forEach(c => wrap.appendChild(c));
+  wrap.appendChild(el('div', 'refresh-note', "Come back tomorrow for a new set of lines. Your Pick Winners spreads are now unlocked for today."));
+  return wrap;
+}
+
+// ---------- Daily Challenge: top-level dispatcher ----------
+function renderDailyChallenge() {
+  const wrap = el('div');
+  if (dailyScreen === 'chooser') {
+    wrap.appendChild(renderDailyChooser());
+    return wrap;
+  }
+  const backBtn = el('button', null, '← Daily Challenge');
+  backBtn.style.cssText = 'background:none;border:none;color:var(--accent);font-size:13px;font-weight:700;padding:8px 0;';
+  backBtn.onclick = () => { dailyScreen = 'chooser'; dailyActiveSport = null; dailyWinnersView = 'home'; render(); };
+  wrap.appendChild(backBtn);
+  if (dailyScreen === 'lines') {
+    wrap.appendChild(renderDailyLines());
+    return wrap;
+  }
+  wrap.appendChild(renderDailyWinners());
+  return wrap;
 }
 
 function renderGames() {
@@ -706,7 +989,8 @@ function renderGameCard(g, sport, meta) {
   if (existingPick) {
     const note = el('div', 'locked-note');
     note.appendChild(el('div', 'ln-title', 'Your bet'));
-    note.innerHTML += `${existingPick.sideAbbr} · <b>${existingPick.units}u</b> risked`;
+    const spreadTxt = pickSpreadDisplay(existingPick);
+    note.innerHTML += `${existingPick.sideAbbr}${spreadTxt ? ' ' + spreadTxt : ''} · <b>${existingPick.units}u</b> risked`;
     card.appendChild(note);
     return card;
   }
@@ -763,6 +1047,7 @@ function renderGameCard(g, sport, meta) {
       player: profile.name, sport, gameId: g.id,
       gameLabel: g.away + ' @ ' + g.home,
       sideAbbr: ab, units,
+      spreadLabel: spreadLabelForSide(sport, g, ab),
       week: weekKey(new Date(g.start)), weekLabel: weekLabel(new Date(g.start)),
       timestamp: new Date().toISOString()
     };
@@ -788,6 +1073,12 @@ function renderGameCard(g, sport, meta) {
   return card;
 }
 
+function parseSpreadLabel(label) {
+  if (label === undefined || label === null) return null;
+  if (label === 'PK') return 0;
+  const n = parseFloat(label);
+  return isNaN(n) ? null : n;
+}
 function settlePick(p) {
   const idx = gameIndex[p.gameId];
   if (!idx) return { status: 'pending' };
@@ -795,10 +1086,20 @@ function settlePick(p) {
   if (g.status !== 'closed' && g.status !== 'complete') return { status: 'pending' };
   const homeScore = g.score?.[g.home], awayScore = g.score?.[g.away];
   if (homeScore === undefined || awayScore === undefined) return { status: 'pending' };
-  const winnerAbbr = homeScore > awayScore ? g.home : (awayScore > homeScore ? g.away : null);
-  if (winnerAbbr === null) return { status: 'push' };
-  const won = winnerAbbr === p.sideAbbr;
-  return { status: won ? 'win' : 'loss', profit: won ? p.units : -p.units };
+
+  const spreadVal = parseSpreadLabel(p.spreadLabel);
+  let outcome;
+  if (spreadVal !== null) {
+    const teamScore = p.sideAbbr === g.home ? homeScore : awayScore;
+    const oppScore = p.sideAbbr === g.home ? awayScore : homeScore;
+    const margin = (teamScore - oppScore) + spreadVal;
+    outcome = margin > 0 ? 'win' : (margin < 0 ? 'loss' : 'push');
+  } else {
+    const winnerAbbr = homeScore > awayScore ? g.home : (awayScore > homeScore ? g.away : null);
+    outcome = winnerAbbr === null ? 'push' : (winnerAbbr === p.sideAbbr ? 'win' : 'loss');
+  }
+  if (outcome === 'push') return { status: 'push' };
+  return { status: outcome, profit: outcome === 'win' ? p.units : -p.units };
 }
 function potentialWin(p) { return p.units; }
 
@@ -912,19 +1213,14 @@ function renderMyPicks() {
 
   // league filter chips — only show leagues the user actually has bets in
   const leaguesPresent = [...new Set(mine.map(p => p.sport))];
-  if (picksLeagueFilter === null) picksLeagueFilter = new Set(leaguesPresent);
   const scroller = el('div', 'league-scroller');
-  const allPill = el('button', 'league-pill' + (picksLeagueFilter.size === leaguesPresent.length ? ' active' : ''), 'All');
-  allPill.onclick = () => { picksLeagueFilter = new Set(leaguesPresent); render(); };
+  const allPill = el('button', 'league-pill' + (picksLeagueFilter === null ? ' active' : ''), 'All');
+  allPill.onclick = () => { picksLeagueFilter = null; render(); };
   scroller.appendChild(allPill);
   leaguesPresent.forEach(sport => {
     const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
-    const pill = el('button', 'league-pill' + (picksLeagueFilter.has(sport) ? ' active' : ''), label);
-    pill.onclick = () => {
-      if (picksLeagueFilter.has(sport)) picksLeagueFilter.delete(sport); else picksLeagueFilter.add(sport);
-      if (picksLeagueFilter.size === 0) picksLeagueFilter = new Set(leaguesPresent);
-      render();
-    };
+    const pill = el('button', 'league-pill' + (picksLeagueFilter === sport ? ' active' : ''), label);
+    pill.onclick = () => { picksLeagueFilter = sport; render(); };
     scroller.appendChild(pill);
   });
   wrap.appendChild(scroller);
@@ -945,7 +1241,7 @@ function renderMyPicks() {
   sortRow.appendChild(sortSelect);
   wrap.appendChild(sortRow);
 
-  mine = mine.filter(p => picksLeagueFilter.has(p.sport));
+  mine = mine.filter(p => picksLeagueFilter === null || p.sport === picksLeagueFilter);
 
   function gameStatusFor(p) {
     const idx = gameIndex[p.gameId];
@@ -992,7 +1288,8 @@ function renderPickRow(p) {
   const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || p.sport.toUpperCase();
   const orphanTag = isOrphaned(p) ? ' <span style="color:var(--danger);font-size:9.5px;text-transform:uppercase;">orphaned</span>' : '';
   left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}${orphanTag}`));
-  left.appendChild(el('div', 'detail', `${p.sideAbbr} · ${p.units}u risked`));
+  const rowSpreadTxt = pickSpreadDisplay(p);
+  left.appendChild(el('div', 'detail', `${p.sideAbbr}${rowSpreadTxt ? ' ' + rowSpreadTxt : ''} · ${p.units}u risked`));
   row.appendChild(left);
   const rightWrap = el('div');
   rightWrap.style.display = 'flex';
@@ -1188,12 +1485,12 @@ function renderStats() {
   return wrap;
 }
 
-function filteredSettledFor(name, dateMode, leagueSet) {
+function filteredSettledFor(name, dateMode, leagueId) {
   return poolOnly(allPicks.filter(p => p.player === name))
     .map(p => ({ p, r: settlePick(p), date: gameIndex[p.gameId] ? new Date(gameIndex[p.gameId].game.start) : new Date(p.timestamp) }))
     .filter(x => x.r.status === 'win' || x.r.status === 'loss')
     .filter(x => inDateRange(x.date, dateMode))
-    .filter(x => !leagueSet || leagueSet.has(x.p.sport));
+    .filter(x => leagueId === null || x.p.sport === leagueId);
 }
 
 function renderLeaderboard() {
@@ -1213,27 +1510,21 @@ function renderLeaderboard() {
   // league filter chips
   const leaguesPresent = [...new Set(allPicks.map(p => p.sport))];
   if (leaguesPresent.length) {
-    if (lbLeagueFilter === null) lbLeagueFilter = new Set(leaguesPresent);
     const leagueScroller = el('div', 'league-scroller');
-    const allPill = el('button', 'league-pill' + (lbLeagueFilter.size === leaguesPresent.length ? ' active' : ''), 'All leagues');
-    allPill.onclick = () => { lbLeagueFilter = new Set(leaguesPresent); render(); };
+    const allPill = el('button', 'league-pill' + (lbLeagueFilter === null ? ' active' : ''), 'All leagues');
+    allPill.onclick = () => { lbLeagueFilter = null; render(); };
     leagueScroller.appendChild(allPill);
     leaguesPresent.forEach(sport => {
       const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
-      const pill = el('button', 'league-pill' + (lbLeagueFilter.has(sport) ? ' active' : ''), label);
-      pill.onclick = () => {
-        if (lbLeagueFilter.has(sport)) lbLeagueFilter.delete(sport); else lbLeagueFilter.add(sport);
-        if (lbLeagueFilter.size === 0) lbLeagueFilter = new Set(leaguesPresent);
-        render();
-      };
+      const pill = el('button', 'league-pill' + (lbLeagueFilter === sport ? ' active' : ''), label);
+      pill.onclick = () => { lbLeagueFilter = sport; render(); };
       leagueScroller.appendChild(pill);
     });
     wrap.appendChild(leagueScroller);
   }
 
-  const activeLeagueSet = leaguesPresent.length ? lbLeagueFilter : null;
   const ranked = names.map(name => {
-    const entries = filteredSettledFor(name, lbDateMode, activeLeagueSet);
+    const entries = filteredSettledFor(name, lbDateMode, lbLeagueFilter);
     const rec = recordFor(entries);
     return { name, profit: rec.net, rec };
   }).sort((a,b) => b.profit - a.profit);
