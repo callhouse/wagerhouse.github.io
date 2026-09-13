@@ -625,9 +625,55 @@ function rankAmong(valueForName) {
   return { rank: idx + 1, total: arr.length };
 }
 
+function isOrphaned(p) { return !gameIndex[p.gameId]; }
+
+async function deletePick(pickId) {
+  const idx = allPicks.findIndex(p => p.id === pickId);
+  if (idx === -1) return;
+  const removed = allPicks.splice(idx, 1)[0];
+  try {
+    await savePicks(allPicks);
+    render();
+  } catch (e) {
+    allPicks.splice(idx, 0, removed);
+    alert("Couldn't delete that bet (" + describeFetchError(e) + ") — try again.");
+    render();
+  }
+}
+async function clearOrphanedPicks() {
+  const kept = allPicks.filter(p => !isOrphaned(p));
+  const removedCount = allPicks.length - kept.length;
+  const prevPicks = allPicks;
+  allPicks = kept;
+  try {
+    await savePicks(allPicks);
+    render();
+  } catch (e) {
+    allPicks = prevPicks;
+    alert("Couldn't clear those bets (" + describeFetchError(e) + ") — try again.");
+    render();
+  }
+}
+
 function renderMyPicks() {
   const wrap = el('div');
   const mine = allPicks.filter(p => p.player === profile.name);
+
+  const orphanedCount = allPicks.filter(isOrphaned).length;
+  if (orphanedCount > 0) {
+    const cleanupCard = el('div', 'locked-note');
+    cleanupCard.style.borderColor = 'var(--danger)';
+    cleanupCard.style.background = 'var(--danger-dark)';
+    cleanupCard.style.color = 'var(--text)';
+    cleanupCard.appendChild(el('div', 'ln-title', 'Cleanup'));
+    cleanupCard.appendChild(document.createTextNode(orphanedCount + ' bet' + (orphanedCount === 1 ? '' : 's') + ' reference games that no longer exist (stuck pending). '));
+    const clearBtn = el('button', 'lock-btn');
+    clearBtn.style.marginTop = '8px';
+    clearBtn.textContent = 'Clear ' + orphanedCount + ' orphaned bet' + (orphanedCount === 1 ? '' : 's') + ' (all players)';
+    clearBtn.onclick = () => clearOrphanedPicks();
+    cleanupCard.appendChild(clearBtn);
+    wrap.appendChild(cleanupCard);
+  }
 
   const curRank = rankAmong(n => n === profile.name ? currentProfit(n) : currentProfit(n));
   const potRank = rankAmong(n => n === profile.name ? potentialProfit(n) : currentProfit(n));
@@ -687,15 +733,25 @@ function renderPickRow(p) {
   const row = el('div', 'pick-row');
   const left = el('div');
   const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || p.sport.toUpperCase();
-  left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}`));
+  const orphanTag = isOrphaned(p) ? ' <span style="color:var(--danger);font-size:9.5px;text-transform:uppercase;">orphaned</span>' : '';
+  left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}${orphanTag}`));
   left.appendChild(el('div', 'detail', `${p.sideAbbr} · ${p.units}u risked`));
   row.appendChild(left);
+  const rightWrap = el('div');
+  rightWrap.style.display = 'flex';
+  rightWrap.style.alignItems = 'center';
+  rightWrap.style.gap = '10px';
   let resultHtml = '', cls = 'pending';
   if (r.status === 'win') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Won</span>'; cls = 'win'; }
   else if (r.status === 'loss') { resultHtml = fmtUnits(r.profit) + '<span class="sub">Lost</span>'; cls = 'loss'; }
   else if (r.status === 'push') { resultHtml = 'Push<span class="sub">Refunded</span>'; cls = 'pending'; }
   else { resultHtml = fmtUnits(potentialWin(p)) + '<span class="sub">If it hits</span>'; cls = 'pending'; }
-  row.appendChild(el('div', 'result ' + cls, resultHtml));
+  rightWrap.appendChild(el('div', 'result ' + cls, resultHtml));
+  const delBtn = el('button', null, '✕');
+  delBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:26px;height:26px;font-size:12px;';
+  delBtn.onclick = () => { if (confirm('Delete this bet? This cannot be undone.')) deletePick(p.id); };
+  rightWrap.appendChild(delBtn);
+  row.appendChild(rightWrap);
   return row;
 }
 
