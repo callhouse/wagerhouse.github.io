@@ -978,13 +978,22 @@ function trackerHistoryChronological(name) {
     .map(p => ({ p, profit: betProfit(p), date: p.placedAt ? new Date(p.placedAt) : new Date(p.timestamp) }))
     .sort((a,b) => a.date - b.date);
 }
-function renderProfitTrendSVG(entries) {
+function trackerDailyTotals(entries) {
   const settled = entries.filter(e => e.profit !== null);
-  if (!settled.length) return '<div class="empty" style="padding:24px 10px;">No settled bets yet.</div>';
-  const w = 320, h = 140, padL = 38, padR = 8, padT = 10, padB = 18;
+  const byDay = {};
+  settled.forEach(e => {
+    const key = e.date.toISOString().slice(0,10);
+    byDay[key] = (byDay[key] || 0) + e.profit;
+  });
+  return Object.keys(byDay).sort().map(key => ({ dateKey: key, profit: byDay[key] }));
+}
+function renderProfitTrendSVG(entries) {
+  const days = trackerDailyTotals(entries);
+  if (!days.length) return '<div class="empty" style="padding:24px 10px;">No settled bets yet.</div>';
+  const w = 320, h = 150, padL = 38, padR = 8, padT = 10, padB = 28;
   const innerW = w - padL - padR, innerH = h - padT - padB;
   let cum = 0;
-  const pts = settled.map(e => { cum += e.profit; return cum; });
+  const pts = days.map(d => { cum += d.profit; return cum; });
   const minV = Math.min(0, ...pts), maxV = Math.max(0, ...pts);
   const range = (maxV - minV) || 1;
   const n = pts.length;
@@ -993,11 +1002,15 @@ function renderProfitTrendSVG(entries) {
   const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i).toFixed(1)} ${yScale(v).toFixed(1)}`).join(' ');
   const zeroY = yScale(0);
   const last = pts[pts.length - 1];
+  const fmtDate = k => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const labelIdxs = n <= 4 ? days.map((_,i) => i) : [0, Math.floor((n-1)/2), n-1];
+  const labels = labelIdxs.map(i => `<text x="${xScale(i).toFixed(1)}" y="${h - 6}" font-size="9" text-anchor="middle" style="fill:var(--text-faint)" font-family="var(--font-mono)">${fmtDate(days[i].dateKey)}</text>`).join('');
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">
     <line x1="${padL}" y1="${zeroY}" x2="${padL + innerW}" y2="${zeroY}" style="stroke:var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
     <text x="2" y="${zeroY + 3}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">$0</text>
     <text x="2" y="${padT + 8}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">${maxV.toFixed(0)}</text>
     <path d="${d}" fill="none" style="stroke:${last >= 0 ? 'var(--accent)' : 'var(--danger)'}" stroke-width="2"/>
+    ${labels}
   </svg>`;
 }
 
@@ -1288,11 +1301,12 @@ function renderKalshiSection() {
   if (!history.length) {
     wrap.appendChild(el('div', 'empty', 'No bets tracked yet — upload a screenshot above.'));
   } else {
-    history.slice().reverse().forEach(({ p, profit }) => {
+    history.slice().reverse().forEach(({ p, profit, date }) => {
       const row = el('div', 'pick-row');
       const left = el('div');
+      const dateTxt = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       left.appendChild(el('div', 'who', `<span class="pick-league">${p.book}</span> ${p.matchup}`));
-      left.appendChild(el('div', 'detail', `${p.selection} · $${p.cost.toFixed(2)} staked`));
+      left.appendChild(el('div', 'detail', `${dateTxt} · ${p.selection} · $${p.cost.toFixed(2)} staked`));
       row.appendChild(left);
       const rightWrap = el('div'); rightWrap.style.cssText = 'display:flex;align-items:center;gap:10px;';
       let resTxt, cls;
