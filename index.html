@@ -199,6 +199,14 @@ async function fetchSportGames(sport) {
     const state = ev.status && ev.status.type && ev.status.type.state;
     const status = state === 'post' ? 'closed' : (state === 'in' ? 'inprogress' : 'scheduled');
     const odds = comp.odds && comp.odds[0];
+    const extractPitcher = (competitor) => {
+      try {
+        const p = competitor.probables && competitor.probables[0];
+        if (p && p.athlete) return p.athlete.shortName || p.athlete.displayName || null;
+        if (p && p.displayName) return p.displayName;
+      } catch (e) { /* field not present in this response */ }
+      return null;
+    };
     const g = {
       id: ev.id,
       status,
@@ -210,6 +218,8 @@ async function fetchSportGames(sport) {
       liveDetail: state === 'in' ? ((ev.status.type && ev.status.type.shortDetail) || null) : null,
       oddsDetails: (odds && odds.details) || null,
       overUnder: (odds && typeof odds.overUnder === 'number') ? odds.overUnder : null,
+      homePitcher: sport === 'mlb' ? extractPitcher(home) : null,
+      awayPitcher: sport === 'mlb' ? extractPitcher(away) : null,
     };
     if (status !== 'scheduled') {
       g.score = { [homeAbbr]: Number(home.score), [awayAbbr]: Number(away.score) };
@@ -692,7 +702,10 @@ function renderWeekGameCard(sport, game, remaining) {
   const card = el('div', 'event-card');
   const timeStr = new Date(game.start).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   card.appendChild(el('div', 'event-meta', game.title || timeStr));
-  card.appendChild(el('div', null, `${game.teams[game.away].name} @ ${game.teams[game.home].name}`)).style.cssText = 'font-size:13.5px;font-weight:700;margin:6px 0 10px;';
+  card.appendChild(el('div', null, `${game.teams[game.away].name} @ ${game.teams[game.home].name}`)).style.cssText = 'font-size:13.5px;font-weight:700;margin:6px 0 4px;';
+  if (sport === 'mlb' && (game.awayPitcher || game.homePitcher)) {
+    card.appendChild(el('div', null, `${game.awayPitcher || 'TBD'} vs ${game.homePitcher || 'TBD'}`)).style.cssText = 'font-size:11px;color:var(--text-faint);margin:0 0 10px;';
+  }
 
   const wk = houseWeekKey(new Date());
   const myBets = weeklyBetsFor(profile.name, wk).filter(p => p.gameId === game.id);
@@ -1560,6 +1573,9 @@ function renderGameCard(g, sport, meta) {
     r.appendChild(el('span', 'team-score', row.sc !== undefined ? row.sc : ''));
     card.appendChild(r);
   });
+  if (sport === 'mlb' && (g.awayPitcher || g.homePitcher)) {
+    card.appendChild(el('div', null, `${g.awayPitcher || 'TBD'} vs ${g.homePitcher || 'TBD'}`)).style.cssText = 'font-size:11px;color:var(--text-faint);margin:-2px 0 8px;';
+  }
 
   if (completed) {
     card.appendChild(el('div', 'no-odds-note', 'Game already final — no pick placed'));
