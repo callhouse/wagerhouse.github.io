@@ -425,6 +425,15 @@ function startPolling() {
 
 // ---------- render root ----------
 function render() {
+  try {
+    renderInner();
+  } catch (e) {
+    console.error('Render failed:', e);
+    const main = document.getElementById('main');
+    if (main) main.innerHTML = '<div class="empty">Something went wrong showing this screen. Your last action was likely saved fine — try switching tabs or reloading.</div>';
+  }
+}
+function renderInner() {
   const scrollY = window.scrollY;
   document.getElementById('whoLabel').textContent = profile ? profile.name : '';
   renderSectionSwitch();
@@ -745,12 +754,13 @@ function renderWeekGameCard(sport, game, remaining) {
       allPicks.push(pick);
       try {
         await savePicks(allPicks);
-        render();
       } catch (e) {
         allPicks.pop();
         lockBtn.disabled = false; lockBtn.textContent = 'Lock: ' + side;
         errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
+        return;
       }
+      render();
     };
     return section;
   }
