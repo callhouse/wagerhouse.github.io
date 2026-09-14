@@ -253,6 +253,7 @@ let lbLeagueFilter = null; // null = all leagues; else a single sport id
 let appSection = 'daily'; // 'daily' | 'pools'
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
 let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
+let houseLeagueFilter = null; // null = all leagues; else a single sport id
 let dailyShowHistory = false; // reused as "show weekly history"
 const HOUSE_BANK_TOTAL = 100;
 const HOUSE_BET_CAP = 30;
@@ -713,6 +714,7 @@ function renderWeekGameCard(sport, game, remaining) {
       if (side && units) { lockBtn.disabled = false; lockBtn.textContent = `Lock: ${side === 'OVER' ? 'Over' : side === 'UNDER' ? 'Under' : side} · ${chipsFor(units)}`; }
       else { lockBtn.disabled = true; lockBtn.textContent = 'Pick a side and confidence'; }
     }
+    updateLockState();
 
     lockBtn.onclick = async () => {
       const side = weeklySelectedSide[key];
@@ -839,11 +841,26 @@ function renderDailyChallenge() {
   }
 
   const games = eligibleWeekGames();
+  const leaguesPresent = [...new Set(games.map(x => x.sport))];
+  if (leaguesPresent.length > 1) {
+    const scroller = el('div', 'league-scroller');
+    const allPill = el('button', 'league-pill' + (houseLeagueFilter === null ? ' active' : ''), 'All');
+    allPill.onclick = () => { houseLeagueFilter = null; render(); };
+    scroller.appendChild(allPill);
+    leaguesPresent.forEach(sport => {
+      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+      const pill = el('button', 'league-pill' + (houseLeagueFilter === sport ? ' active' : ''), label);
+      pill.onclick = () => { houseLeagueFilter = sport; render(); };
+      scroller.appendChild(pill);
+    });
+    wrap.appendChild(scroller);
+  }
+  const filteredGames = houseLeagueFilter === null ? games : games.filter(x => x.sport === houseLeagueFilter);
   wrap.appendChild(el('div', 'week-header', 'This week\'s games'));
-  if (!games.length) {
-    wrap.appendChild(el('div', 'empty', 'No games with a posted line this week yet — check back soon.'));
+  if (!filteredGames.length) {
+    wrap.appendChild(el('div', 'empty', games.length ? 'No games in this league this week.' : 'No games with a posted line this week yet — check back soon.'));
   } else {
-    games.forEach(({ sport, game }) => wrap.appendChild(renderWeekGameCard(sport, game, remaining)));
+    filteredGames.forEach(({ sport, game }) => wrap.appendChild(renderWeekGameCard(sport, game, remaining)));
   }
   wrap.appendChild(el('div', 'refresh-note', `100 house units a week. Up to ${HOUSE_BET_CAP}u (3 🔥) on any one bet — straight spread or total, your call. Units lock once a game starts; whatever's left carries you through the rest of the week.`));
   return wrap;
