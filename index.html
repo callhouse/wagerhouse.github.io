@@ -270,8 +270,8 @@ let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or
 let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
 let houseLeagueFilter = null; // null = all leagues; else a single sport id
 let dailyShowHistory = false; // reused as "show weekly history"
-const HOUSE_BANK_TOTAL = 100;
-const HOUSE_BET_CAP = 10;
+const HOUSE_BANK_TOTAL = 10;
+const HOUSE_BET_CAP = 3;
 const WH_RATING_BASE = 1500;
 let setupError = '';
 
@@ -553,9 +553,7 @@ function weekRangeLabel(wk) {
   return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '–' + end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 function chipsFor(units) {
-  if (units <= 3) return '\ud83d\udd25';
-  if (units <= 7) return '\ud83d\udd25\ud83d\udd25';
-  return '\ud83d\udd25\ud83d\udd25\ud83d\udd25';
+  return '\ud83d\udd25'.repeat(Math.max(0, Math.min(3, Math.round(units))));
 }
 
 function eligibleWeekGames() {
@@ -741,24 +739,29 @@ function renderWeekGameCard(sport, game, remaining) {
     section.appendChild(grid);
 
     const slip = el('div', 'bet-slip');
-    const tierRow = el('div');
-    tierRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px;';
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach(n => {
-      const tierUnits = n;
-      const disabled = tierUnits > remaining;
-      const btn = el('div', 'outcome-btn' + (weeklySelectedUnits[key] === tierUnits ? ' selected' : '') + (disabled ? ' disabled' : ''));
-      btn.innerHTML = `<div class="oc-team">${chipsFor(tierUnits)}</div><div class="oc-line">${tierUnits}u</div>`;
-      if (!disabled) {
-        btn.onclick = () => {
-          weeklySelectedUnits[key] = tierUnits;
-          tierRow.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
-          btn.classList.add('selected');
-          updateLockState();
-        };
-      }
-      tierRow.appendChild(btn);
-    });
-    slip.appendChild(tierRow);
+    if (weeklySelectedUnits[key] === undefined) weeklySelectedUnits[key] = 0;
+    const cap = Math.min(HOUSE_BET_CAP, remaining);
+
+    const confRow = el('div');
+    confRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;';
+    const addBtn = el('button', null, '+ Add confidence');
+    addBtn.style.cssText = 'flex:1;background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:11px;font-size:13px;font-weight:700;';
+    const removeBtn = el('button', null, '\u2715');
+    removeBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:38px;height:38px;font-size:14px;flex-shrink:0;';
+    confRow.appendChild(addBtn);
+    confRow.appendChild(removeBtn);
+    slip.appendChild(confRow);
+
+    function refreshConfidenceUI() {
+      const u = weeklySelectedUnits[key];
+      addBtn.textContent = u > 0 ? `${chipsFor(u)}  Add confidence (${u}/${cap})` : '+ Add confidence';
+      addBtn.disabled = u >= cap;
+      removeBtn.disabled = u <= 0;
+      updateLockState();
+    }
+    addBtn.onclick = () => { if (weeklySelectedUnits[key] < cap) weeklySelectedUnits[key]++; refreshConfidenceUI(); };
+    removeBtn.onclick = () => { if (weeklySelectedUnits[key] > 0) weeklySelectedUnits[key]--; refreshConfidenceUI(); };
+
     lockBtn = el('button', 'lock-btn', 'Pick a side and confidence');
     lockBtn.disabled = true;
     slip.appendChild(lockBtn);
@@ -771,6 +774,7 @@ function renderWeekGameCard(sport, game, remaining) {
       if (side && units) { lockBtn.disabled = false; lockBtn.textContent = `Lock: ${side === 'OVER' ? 'Over' : side === 'UNDER' ? 'Under' : side} · ${chipsFor(units)}`; }
       else { lockBtn.disabled = true; lockBtn.textContent = 'Pick a side and confidence'; }
     }
+    refreshConfidenceUI();
     updateLockState();
 
     lockBtn.onclick = async () => {
