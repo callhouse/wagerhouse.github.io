@@ -254,9 +254,7 @@ let picksCollapsed = { active: false, future: false, past: false };
 let lbDateMode = 'all'; // 'day' | 'week' | 'year' | 'all'
 let lbLeagueFilter = null; // null = all leagues; else a single sport id
 let appSection = 'daily'; // 'daily' | 'pools' | 'kalshi'
-let kalshiPendingExtraction = null; // array of extracted positions awaiting confirmation, or null
-let kalshiExtracting = false;
-let kalshiExtractError = null;
+let kalshiPendingExtraction = null; // array of draft bets being entered, or null
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
 let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
 let houseLeagueFilter = null; // null = all leagues; else a single sport id
@@ -927,14 +925,6 @@ function renderDailyChallenge() {
 function trackerBetsFor(name) {
   return allPicks.filter(p => p.player === name && p.poolType === 'tracker');
 }
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 function normTeamName(s) { return (s || '').toLowerCase().replace(/[^a-z]/g, ''); }
 function matchGameForBet(matchupText) {
   if (!matchupText) return null;
@@ -951,34 +941,6 @@ function matchGameForBet(matchupText) {
     });
   });
   return best;
-}
-async function extractBetsFromImage(file) {
-  const base64Data = await readFileAsBase64(file);
-  const mediaType = file.type || 'image/jpeg';
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1500,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
-          { type: "text", text: "This is a screenshot of a sports bet from some sportsbook or prediction market app (could be Kalshi, DraftKings, FanDuel, or any other). Extract every distinct bet/position visible. Respond with ONLY a raw JSON array (no markdown fences, no explanation). Each item must be an object with exactly these fields: book (string, the sportsbook/app name if identifiable from logos or branding, else \"Unknown\"), matchup (string, the two teams involved, e.g. \"WAS Commanders @ PHI Eagles\"), selection (string, the specific pick in plain language, e.g. \"PHI Eagles -5.5\" or \"Over 48.5\" or \"Commanders ML\"), cost (number, dollar amount wagered/paid, no $ sign), payout (number or null, the ACTUAL amount paid out if the bet is already settled/closed — use 0 if it lost and shows $0 paid out, use null if the bet is still open/pending and not yet settled), maxPayout (number or null, the potential/max payout shown for an open bet, else null), status (\"open\" or \"settled\"), placedAt (string or null, a date/time shown on the screenshot, else null). If you see no bets, respond with []." }
-        ]
-      }]
-    })
-  });
-  if (!response.ok) throw new Error('API request failed: ' + response.status);
-  const data = await response.json();
-  const text = (data.content || []).map(b => b.text || '').join('');
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  let parsed;
-  try { parsed = JSON.parse(cleaned); }
-  catch (e) { throw new Error('Could not parse response: ' + cleaned.slice(0, 200)); }
-  if (!Array.isArray(parsed)) throw new Error('Unexpected response shape');
-  return parsed;
 }
 function betProfit(p) {
   if (p.status !== 'settled' || p.payout === null || p.payout === undefined) return null;
@@ -1014,66 +976,38 @@ function renderProfitTrendSVG(entries) {
 
 function renderKalshiSection() {
   const wrap = el('div');
-  wrap.appendChild(el('div', 'setup-hint', "Upload a screenshot of a bet from any sportsbook or prediction market — Claude reads the matchup, pick, stake, and payout off the image. Nothing here touches your real accounts or credentials."));
+  wrap.appendChild(el('div', 'setup-hint', "Log bets from any sportsbook or prediction market by hand — matchup, pick, stake, and payout once it settles. Nothing here touches your real accounts."));
 
-  const uploadCard = el('div', 'event-card');
-  uploadCard.style.padding = '16px';
-  const fileInput = el('input');
-  fileInput.type = 'file'; fileInput.accept = 'image/*';
-  fileInput.style.cssText = 'width:100%;color:var(--text-dim);font-size:13px;';
-  uploadCard.appendChild(el('div', null, '📷 Upload a bet screenshot')).style.cssText = 'font-size:14px;font-weight:700;margin-bottom:10px;';
-  uploadCard.appendChild(fileInput);
-  const statusEl = el('div', 'pick-error');
-  uploadCard.appendChild(statusEl);
-  wrap.appendChild(uploadCard);
-
-  fileInput.onchange = async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    kalshiExtracting = true; kalshiExtractError = null; kalshiPendingExtraction = null;
-    render();
-    try {
-      const bets = await extractBetsFromImage(file);
-      kalshiPendingExtraction = bets.map((b, i) => {
-        const match = matchGameForBet(b.matchup);
-        return {
-          _tempId: 'temp_' + i,
-          book: b.book || 'Unknown', matchup: b.matchup || '', selection: b.selection || '',
-          cost: Number(b.cost) || 0,
-          payout: (b.payout === null || b.payout === undefined) ? null : Number(b.payout),
-          maxPayout: (b.maxPayout === null || b.maxPayout === undefined) ? null : Number(b.maxPayout),
-          status: b.status === 'settled' ? 'settled' : 'open',
-          placedAt: b.placedAt || null,
-          matchedSport: match ? match.sport : null, matchedGameId: match ? match.gameId : null
-        };
-      });
-    } catch (e) {
-      kalshiExtractError = e.message || String(e);
-    }
-    kalshiExtracting = false;
+  const addBtn = el('button', 'lock-btn', '+ Add a bet');
+  addBtn.style.marginBottom = '4px';
+  addBtn.onclick = () => {
+    if (!kalshiPendingExtraction) kalshiPendingExtraction = [];
+    kalshiPendingExtraction.push({
+      _tempId: 'temp_' + Date.now(),
+      book: '', matchup: '', selection: '',
+      cost: 0, payout: null, maxPayout: null,
+      status: 'open', placedAt: null,
+      matchedSport: null, matchedGameId: null
+    });
     render();
   };
-
-  if (kalshiExtracting) {
-    wrap.appendChild(el('div', 'empty', 'Reading bets from your screenshot…'));
-    return wrap;
-  }
-  if (kalshiExtractError) {
-    wrap.appendChild(el('div', 'no-odds-note', 'Could not read that image: ' + kalshiExtractError));
-  }
+  wrap.appendChild(addBtn);
 
   if (kalshiPendingExtraction && kalshiPendingExtraction.length) {
-    wrap.appendChild(el('div', 'week-header', `Found ${kalshiPendingExtraction.length} bet${kalshiPendingExtraction.length === 1 ? '' : 's'} — review before saving`));
+    wrap.appendChild(el('div', 'week-header', `New bet${kalshiPendingExtraction.length === 1 ? '' : 's'} — fill in and save`));
     kalshiPendingExtraction.forEach(bet => {
       const card = el('div', 'event-card');
-      if (bet.matchedGameId) card.appendChild(el('div', 'event-meta', 'Matched to a game on file')).style.cssText = 'color:var(--accent);font-size:10.5px;margin-bottom:6px;';
 
-      const matchupInput = el('input'); matchupInput.value = bet.matchup; matchupInput.placeholder = 'Matchup';
+      const matchupInput = el('input'); matchupInput.value = bet.matchup; matchupInput.placeholder = 'Matchup (e.g. WAS Commanders @ PHI Eagles)';
       matchupInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin-bottom:6px;';
-      matchupInput.oninput = () => { bet.matchup = matchupInput.value; };
+      matchupInput.oninput = () => {
+        bet.matchup = matchupInput.value;
+        const match = matchGameForBet(bet.matchup);
+        bet.matchedSport = match ? match.sport : null; bet.matchedGameId = match ? match.gameId : null;
+      };
       card.appendChild(matchupInput);
 
-      const selInput = el('input'); selInput.value = bet.selection; selInput.placeholder = 'Selection (e.g. PHI -5.5)';
+      const selInput = el('input'); selInput.value = bet.selection; selInput.placeholder = 'Selection (e.g. PHI -5.5, Over 48.5)';
       selInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin-bottom:8px;';
       selInput.oninput = () => { bet.selection = selInput.value; };
       card.appendChild(selInput);
@@ -1102,6 +1036,7 @@ function renderKalshiSection() {
       statusSel.onchange = () => { bet.status = statusSel.value; };
       statusRow.appendChild(statusSel);
       card.appendChild(statusRow);
+      if (bet.matchedGameId) card.appendChild(el('div', 'event-meta', 'Matched to a game on file')).style.cssText = 'color:var(--accent);font-size:10.5px;margin-top:6px;';
 
       const discardBtn = el('button', null, 'Discard this one');
       discardBtn.style.cssText = 'margin-top:8px;background:none;border:1px solid var(--border);color:var(--text-faint);font-size:11px;padding:6px 10px;border-radius:6px;';
@@ -1112,11 +1047,13 @@ function renderKalshiSection() {
 
     const saveBtn = el('button', 'lock-btn', 'Save all bets');
     saveBtn.onclick = async () => {
+      const invalid = kalshiPendingExtraction.find(b => !b.matchup.trim() || !b.selection.trim() || !b.cost);
+      if (invalid) { alert('Fill in matchup, selection, and cost for every bet before saving.'); return; }
       saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
       const newRecords = kalshiPendingExtraction.map(bet => ({
         id: profile.name + '_tracker_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
         player: profile.name, poolType: 'tracker',
-        book: bet.book, matchup: bet.matchup, selection: bet.selection,
+        book: bet.book || 'Unknown', matchup: bet.matchup, selection: bet.selection,
         cost: bet.cost, payout: bet.payout, maxPayout: bet.maxPayout, status: bet.status,
         placedAt: bet.placedAt, matchedSport: bet.matchedSport, matchedGameId: bet.matchedGameId,
         timestamp: new Date().toISOString()
