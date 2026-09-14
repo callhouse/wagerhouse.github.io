@@ -735,32 +735,40 @@ function renderWeekGameCard(sport, game, remaining) {
     updateLockState();
 
     lockBtn.onclick = async () => {
-      const side = weeklySelectedSide[key];
-      const units = weeklySelectedUnits[key];
-      errEl.textContent = '';
-      if (!side) { errEl.textContent = 'Pick a side first.'; return; }
-      if (!units) { errEl.textContent = 'Pick 1, 2, or 3 flames.'; return; }
-      if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left in your bank this week.`; return; }
-      const line = betType === 'total' ? totalVal : (side === game.home ? spreadVal : -spreadVal);
-      const pick = {
-        id: profile.name + '_weekly_' + game.id + '_' + betType + '_' + Date.now(),
-        player: profile.name, sport, gameId: game.id,
-        gameLabel: game.away + ' @ ' + game.home,
-        betType, sideAbbr: side, line, units,
-        weekKey: wk,
-        timestamp: new Date().toISOString()
-      };
-      lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
-      allPicks.push(pick);
       try {
-        await savePicks(allPicks);
-      } catch (e) {
-        allPicks.pop();
-        lockBtn.disabled = false; lockBtn.textContent = 'Lock: ' + side;
-        errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
-        return;
+        const side = weeklySelectedSide[key];
+        const units = weeklySelectedUnits[key];
+        errEl.textContent = '';
+        if (!side) { errEl.textContent = 'Pick a side first.'; return; }
+        if (!units) { errEl.textContent = 'Pick 1, 2, or 3 flames.'; return; }
+        if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left in your bank this week.`; return; }
+        const line = betType === 'total' ? totalVal : (side === game.home ? spreadVal : -spreadVal);
+        const pick = {
+          id: profile.name + '_weekly_' + game.id + '_' + betType + '_' + Date.now(),
+          player: profile.name, sport, gameId: game.id,
+          gameLabel: game.away + ' @ ' + game.home,
+          betType, sideAbbr: side, line, units,
+          weekKey: wk,
+          timestamp: new Date().toISOString()
+        };
+        lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
+        allPicks.push(pick);
+        try {
+          await savePicks(allPicks);
+        } catch (saveErr) {
+          allPicks.pop();
+          lockBtn.disabled = false; lockBtn.textContent = 'Lock: ' + side;
+          const msg = describeFetchError(saveErr);
+          errEl.textContent = "Couldn't save (" + msg + ") — try again.";
+          alert('Save failed: ' + msg);
+          return;
+        }
+        render();
+      } catch (outerErr) {
+        const msg = (outerErr && outerErr.message) ? outerErr.message : String(outerErr);
+        alert('Unexpected error locking this bet: ' + msg);
+        lockBtn.disabled = false;
       }
-      render();
     };
     return section;
   }
