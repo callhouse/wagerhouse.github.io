@@ -903,7 +903,7 @@ function renderDailyChallenge() {
     allPill.onclick = () => { houseLeagueFilter = null; render(); };
     scroller.appendChild(allPill);
     leaguesPresent.forEach(sport => {
-      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
       const pill = el('button', 'league-pill' + (houseLeagueFilter === sport ? ' active' : ''), label);
       pill.onclick = () => { houseLeagueFilter = sport; render(); };
       scroller.appendChild(pill);
@@ -1333,7 +1333,7 @@ async function persistNewlySettledPicks() {
 }
 function potentialWin(p) { return p.units; }
 
-function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'kalshi'); }
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi'); }
 async function migrateLegacyWeeklyPicks() {
   let changed = false;
   allPicks.forEach(p => {
@@ -1455,7 +1455,7 @@ function renderMyPicks() {
   allPill.onclick = () => { picksLeagueFilter = null; render(); };
   scroller.appendChild(allPill);
   leaguesPresent.forEach(sport => {
-    const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+    const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
     const pill = el('button', 'league-pill' + (picksLeagueFilter === sport ? ' active' : ''), label);
     pill.onclick = () => { picksLeagueFilter = sport; render(); };
     scroller.appendChild(pill);
@@ -1506,7 +1506,7 @@ function renderMyPicks() {
     const byLeague = {};
     list.forEach(p => { (byLeague[p.sport] = byLeague[p.sport] || []).push(p); });
     Object.keys(byLeague).forEach(sport => {
-      const leagueLabel = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+      const leagueLabel = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
       if (Object.keys(byLeague).length > 1) {
         const sub = el('div', null, leagueLabel);
         sub.style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;margin:8px 2px 0;font-weight:700;';
@@ -1522,7 +1522,7 @@ function renderPickRow(p) {
   const r = settlePick(p);
   const row = el('div', 'pick-row');
   const left = el('div');
-  const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || p.sport.toUpperCase();
+  const leagueLabel = (LEAGUES_META.find(l => l.id === p.sport) || {}).label || (p.sport || 'sport').toUpperCase();
   const orphanTag = isOrphaned(p) ? ' <span style="color:var(--danger);font-size:9.5px;text-transform:uppercase;">orphaned</span>' : '';
   left.appendChild(el('div', 'who', `<span class="pick-league">${leagueLabel}</span> ${p.gameLabel}${orphanTag}`));
   const marketTxt = p.betType === 'total'
@@ -1701,7 +1701,7 @@ function renderStats() {
   entries.forEach(x => { (byLeague[x.p.sport] = byLeague[x.p.sport] || []).push(x); });
   const leagueRows = Object.keys(byLeague).map(sport => {
     const rec = recordFor(byLeague[sport]);
-    const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+    const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
     return { label, w: rec.w, l: rec.l, winPct: rec.winPct, net: rec.net };
   }).sort((a, b) => b.net - a.net);
 
@@ -1747,14 +1747,14 @@ function renderLeaderboard() {
   wrap.appendChild(dateScroller);
 
   // league filter chips
-  const leaguesPresent = [...new Set(allPicks.map(p => p.sport))];
+  const leaguesPresent = [...new Set(poolOnly(allPicks).map(p => p.sport))];
   if (leaguesPresent.length) {
     const leagueScroller = el('div', 'league-scroller');
     const allPill = el('button', 'league-pill' + (lbLeagueFilter === null ? ' active' : ''), 'All leagues');
     allPill.onclick = () => { lbLeagueFilter = null; render(); };
     leagueScroller.appendChild(allPill);
     leaguesPresent.forEach(sport => {
-      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
       const pill = el('button', 'league-pill' + (lbLeagueFilter === sport ? ' active' : ''), label);
       pill.onclick = () => { lbLeagueFilter = sport; render(); };
       leagueScroller.appendChild(pill);
