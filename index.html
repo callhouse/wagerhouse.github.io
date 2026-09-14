@@ -252,6 +252,7 @@ let lbDateMode = 'all'; // 'day' | 'week' | 'year' | 'all'
 let lbLeagueFilter = null; // null = all leagues; else a single sport id
 let appSection = 'daily'; // 'daily' | 'pools'
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
+let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
 let dailyShowHistory = false; // reused as "show weekly history"
 const HOUSE_BANK_TOTAL = 100;
 const HOUSE_BET_CAP = 30;
@@ -667,7 +668,7 @@ function renderWeekGameCard(sport, game, remaining) {
 
     const key = game.id + '_' + betType;
     const grid = el('div', 'outcome-grid');
-    let lockBtn, chipPreview, unitsInput;
+    let lockBtn;
     sideOptions.forEach(opt => {
       const btn = el('div', 'outcome-btn' + (weeklySelectedSide[key] === opt.side ? ' selected' : ''));
       btn.innerHTML = `<div class="oc-team">${opt.team}</div><div class="oc-line">${opt.label}</div>`;
@@ -675,41 +676,50 @@ function renderWeekGameCard(sport, game, remaining) {
         weeklySelectedSide[key] = opt.side;
         grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
-        lockBtn.disabled = false;
-        lockBtn.textContent = 'Lock: ' + opt.team;
+        updateLockState();
       };
       grid.appendChild(btn);
     });
     section.appendChild(grid);
 
     const slip = el('div', 'bet-slip');
-    const bsRow = el('div', 'bs-row');
-    bsRow.appendChild(el('label', null, 'Units'));
-    unitsInput = el('input');
-    unitsInput.type = 'number'; unitsInput.min = '1'; unitsInput.step = '1';
-    unitsInput.max = String(Math.min(HOUSE_BET_CAP, remaining));
-    unitsInput.value = String(Math.min(10, HOUSE_BET_CAP, remaining));
-    bsRow.appendChild(unitsInput);
-    chipPreview = el('div');
-    chipPreview.style.cssText = 'font-size:15px;';
-    chipPreview.textContent = chipsFor(parseFloat(unitsInput.value) || 0);
-    bsRow.appendChild(chipPreview);
-    unitsInput.addEventListener('input', () => { chipPreview.textContent = chipsFor(parseFloat(unitsInput.value) || 0); });
-    slip.appendChild(bsRow);
-    lockBtn = el('button', 'lock-btn', 'Select a side');
+    const tierRow = el('div');
+    tierRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;';
+    [1, 2, 3].forEach(n => {
+      const tierUnits = n * 10;
+      const disabled = tierUnits > remaining;
+      const btn = el('div', 'outcome-btn' + (weeklySelectedUnits[key] === tierUnits ? ' selected' : '') + (disabled ? ' disabled' : ''));
+      btn.innerHTML = `<div class="oc-team">${chipsFor(tierUnits)}</div><div class="oc-line">${tierUnits}u</div>`;
+      if (!disabled) {
+        btn.onclick = () => {
+          weeklySelectedUnits[key] = tierUnits;
+          tierRow.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          updateLockState();
+        };
+      }
+      tierRow.appendChild(btn);
+    });
+    slip.appendChild(tierRow);
+    lockBtn = el('button', 'lock-btn', 'Pick a side and confidence');
     lockBtn.disabled = true;
     slip.appendChild(lockBtn);
     const errEl = el('div', 'pick-error');
     slip.appendChild(errEl);
     section.appendChild(slip);
 
+    function updateLockState() {
+      const side = weeklySelectedSide[key], units = weeklySelectedUnits[key];
+      if (side && units) { lockBtn.disabled = false; lockBtn.textContent = `Lock: ${side === 'OVER' ? 'Over' : side === 'UNDER' ? 'Under' : side} · ${chipsFor(units)}`; }
+      else { lockBtn.disabled = true; lockBtn.textContent = 'Pick a side and confidence'; }
+    }
+
     lockBtn.onclick = async () => {
       const side = weeklySelectedSide[key];
-      const units = parseFloat(unitsInput.value);
+      const units = weeklySelectedUnits[key];
       errEl.textContent = '';
       if (!side) { errEl.textContent = 'Pick a side first.'; return; }
-      if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
-      if (units > HOUSE_BET_CAP) { errEl.textContent = `Max ${HOUSE_BET_CAP}u (3 chips) per bet.`; return; }
+      if (!units) { errEl.textContent = 'Pick 1, 2, or 3 flames.'; return; }
       if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left in your bank this week.`; return; }
       const line = betType === 'total' ? totalVal : (side === game.home ? spreadVal : -spreadVal);
       const pick = {
