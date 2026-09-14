@@ -166,6 +166,9 @@ const ESPN_PATHS = {
   nfl: { sport: 'football', league: 'nfl' },
   mlb: { sport: 'baseball', league: 'mlb' },
   ncaaf: { sport: 'football', league: 'college-football' },
+  nba: { sport: 'basketball', league: 'nba' },
+  nhl: { sport: 'hockey', league: 'nhl' },
+  ncaab: { sport: 'basketball', league: 'mens-college-basketball' },
 };
 async function fetchSportGames(sport) {
   const { sport: espnSport, league } = ESPN_PATHS[sport];
@@ -255,6 +258,8 @@ let lbDateMode = 'all'; // 'day' | 'week' | 'year' | 'all'
 let lbLeagueFilter = null; // null = all leagues; else a single sport id
 let appSection = 'daily'; // 'daily' | 'pools' | 'kalshi'
 let kalshiPendingExtraction = null; // array of draft bets being entered, or null
+let trackerWizardOpen = false;
+let trackerWizard = {}; // in-progress wizard state, reset each time the wizard opens
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
 let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
 let houseLeagueFilter = null; // null = all leagues; else a single sport id
@@ -942,6 +947,28 @@ function matchGameForBet(matchupText) {
   });
   return best;
 }
+async function fetchGamesForDate(sport, dateStr) {
+  const paths = ESPN_PATHS[sport];
+  if (!paths) return [];
+  const compact = dateStr.replace(/-/g, '');
+  try {
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${paths.sport}/${paths.league}/scoreboard?dates=${compact}&limit=300`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return (json.events || []).map(ev => {
+      const comp = ev.competitions && ev.competitions[0];
+      if (!comp) return null;
+      const home = comp.competitors && comp.competitors.find(c => c.homeAway === 'home');
+      const away = comp.competitors && comp.competitors.find(c => c.homeAway === 'away');
+      if (!home || !away || !home.team || !away.team) return null;
+      return {
+        id: ev.id,
+        home: home.team.abbreviation, away: away.team.abbreviation,
+        homeName: home.team.displayName, awayName: away.team.displayName
+      };
+    }).filter(Boolean);
+  } catch (e) { return []; }
+}
 function betProfit(p) {
   if (p.status !== 'settled' || p.payout === null || p.payout === undefined) return null;
   return p.payout - p.cost;
@@ -974,23 +1001,189 @@ function renderProfitTrendSVG(entries) {
   </svg>`;
 }
 
-function renderKalshiSection() {
-  const wrap = el('div');
-  wrap.appendChild(el('div', 'setup-hint', "Log bets from any sportsbook or prediction market by hand — matchup, pick, stake, and payout once it settles. Nothing here touches your real accounts."));
+function renderTrackerWizard() {
+  const card = el('div', 'event-card');
+  card.style.padding = '16px';
+  card.appendChild(el('div', null, '📝 Log a bet')).style.cssText = 'font-size:14px;font-weight:700;margin-bottom:12px;';
 
-  const addBtn = el('button', 'lock-btn', '+ Add a bet');
-  addBtn.style.marginBottom = '4px';
+  const dateRow = el('div'); dateRow.style.cssText = 'margin-bottom:10px;';
+  dateRow.appendChild(el('label', null, 'Date')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const dateInput = el('input'); dateInput.type = 'date';
+  dateInput.max = new Date().toISOString().slice(0,10);
+  dateInput.value = new Date().toISOString().slice(0,10);
+  dateInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
+  dateRow.appendChild(dateInput);
+  card.appendChild(dateRow);
+
+  const leagueRow = el('div'); leagueRow.style.cssText = 'margin-bottom:10px;';
+  leagueRow.appendChild(el('label', null, 'League')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const leagueSel = el('select');
+  leagueSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
+  const blankLeagueOpt = document.createElement('option'); blankLeagueOpt.value = ''; blankLeagueOpt.textContent = 'Select a league…'; leagueSel.appendChild(blankLeagueOpt);
+  LEAGUES_META.forEach(lg => { const o = document.createElement('option'); o.value = lg.id; o.textContent = lg.label; leagueSel.appendChild(o); });
+  leagueRow.appendChild(leagueSel);
+  card.appendChild(leagueRow);
+
+  const loadingNote = el('div', 'empty', 'Loading games…'); loadingNote.style.display = 'none'; loadingNote.style.padding = '10px 0';
+  card.appendChild(loadingNote);
+
+  const matchupWrap = el('div'); matchupWrap.style.display = 'none';
+  matchupWrap.appendChild(el('label', null, 'Matchup')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const matchupSel = el('select');
+  matchupSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;margin-bottom:10px;';
+  matchupWrap.appendChild(matchupSel);
+  card.appendChild(matchupWrap);
+
+  const noGamesNote = el('div', 'no-odds-note', 'No games found for that date/league — type the matchup manually below.');
+  noGamesNote.style.display = 'none';
+  card.appendChild(noGamesNote);
+  const manualMatchupInput = el('input'); manualMatchupInput.placeholder = 'Type matchup manually (e.g. WAS @ PHI)';
+  manualMatchupInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;margin-bottom:10px;display:none;';
+  card.appendChild(manualMatchupInput);
+
+  let gamesForDate = [];
+
+  const step3 = el('div'); step3.style.display = 'none';
+  const row3 = el('div'); row3.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;';
+  const betTypeSel = el('select'); betTypeSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+  [['spread','Spread'],['total','Total'],['moneyline','Moneyline']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; betTypeSel.appendChild(o); });
+  row3.appendChild(betTypeSel);
+  const bookSel = el('select'); bookSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+  ['DraftKings','FanDuel','Kalshi','BetMGM','Caesars','ESPN Bet','Other'].forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; bookSel.appendChild(o); });
+  row3.appendChild(bookSel);
+  step3.appendChild(row3);
+
+  step3.appendChild(el('label', null, 'Your side')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const sideSel = el('select');
+  sideSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;margin-bottom:10px;';
+  step3.appendChild(sideSel);
+  card.appendChild(step3);
+
+  const step4 = el('div'); step4.style.display = 'none';
+  const lineLabel = el('label', null, 'Spread'); lineLabel.style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  step4.appendChild(lineLabel);
+  const lineInput = el('input'); lineInput.type = 'number'; lineInput.step = '0.5'; lineInput.placeholder = 'e.g. -5.5';
+  lineInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;margin-bottom:10px;';
+  step4.appendChild(lineInput);
+
+  const row4 = el('div'); row4.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+  const costWrap = el('div');
+  costWrap.appendChild(el('label', null, 'Amount bet ($)')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const costInput = el('input'); costInput.type = 'number'; costInput.step = '0.01'; costInput.placeholder = '10.00';
+  costInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
+  costWrap.appendChild(costInput);
+  row4.appendChild(costWrap);
+  const payoutWrap = el('div');
+  payoutWrap.appendChild(el('label', null, 'Payout ($)')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const payoutInput = el('input'); payoutInput.type = 'number'; payoutInput.step = '0.01'; payoutInput.placeholder = 'blank if still open';
+  payoutInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
+  payoutWrap.appendChild(payoutInput);
+  row4.appendChild(payoutWrap);
+  step4.appendChild(row4);
+  card.appendChild(step4);
+
+  function refreshSideOptions() {
+    sideSel.innerHTML = '';
+    const g = gamesForDate.find(x => x.id === matchupSel.value);
+    if (betTypeSel.value === 'total') {
+      ['OVER','UNDER'].forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v === 'OVER' ? 'Over' : 'Under'; sideSel.appendChild(o); });
+    } else if (g) {
+      [{ v: g.away, l: g.awayName }, { v: g.home, l: g.homeName }].forEach(t => { const o = document.createElement('option'); o.value = t.v; o.textContent = t.l; sideSel.appendChild(o); });
+    } else {
+      [['away','Away team'],['home','Home team']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; sideSel.appendChild(o); });
+    }
+  }
+  function updateLineVisibility() {
+    const isML = betTypeSel.value === 'moneyline';
+    lineInput.style.display = isML ? 'none' : '';
+    lineLabel.style.display = isML ? 'none' : '';
+    lineLabel.textContent = betTypeSel.value === 'total' ? 'Total line' : 'Spread';
+  }
+  function revealStepsAfterMatchup(hasMatchup) {
+    step3.style.display = hasMatchup ? 'block' : 'none';
+    step4.style.display = hasMatchup ? 'block' : 'none';
+    if (hasMatchup) { refreshSideOptions(); updateLineVisibility(); }
+  }
+
+  async function loadGames() {
+    matchupWrap.style.display = 'none'; noGamesNote.style.display = 'none'; manualMatchupInput.style.display = 'none';
+    revealStepsAfterMatchup(false);
+    gamesForDate = [];
+    if (!dateInput.value || !leagueSel.value) return;
+    loadingNote.style.display = 'block';
+    gamesForDate = await fetchGamesForDate(leagueSel.value, dateInput.value);
+    loadingNote.style.display = 'none';
+    if (gamesForDate.length) {
+      matchupSel.innerHTML = '';
+      const blank = document.createElement('option'); blank.value = ''; blank.textContent = 'Select a matchup…'; matchupSel.appendChild(blank);
+      gamesForDate.forEach(g => { const o = document.createElement('option'); o.value = g.id; o.textContent = `${g.awayName} @ ${g.homeName}`; matchupSel.appendChild(o); });
+      matchupWrap.style.display = 'block';
+    } else {
+      noGamesNote.style.display = 'block';
+      manualMatchupInput.style.display = 'block';
+    }
+  }
+  dateInput.onchange = loadGames;
+  leagueSel.onchange = loadGames;
+  matchupSel.onchange = () => revealStepsAfterMatchup(!!matchupSel.value);
+  manualMatchupInput.oninput = () => revealStepsAfterMatchup(!!manualMatchupInput.value);
+  betTypeSel.onchange = () => { refreshSideOptions(); updateLineVisibility(); };
+
+  const errEl = el('div', 'pick-error');
+  card.appendChild(errEl);
+
+  const addBtn = el('button', 'lock-btn', 'Add this bet');
+  addBtn.style.marginTop = '10px';
   addBtn.onclick = () => {
+    errEl.textContent = '';
+    const matchupText = matchupSel.value ? matchupSel.options[matchupSel.selectedIndex].textContent : manualMatchupInput.value;
+    if (!matchupText) { errEl.textContent = 'Pick or enter a matchup first.'; return; }
+    if (betTypeSel.value !== 'moneyline' && !lineInput.value) { errEl.textContent = 'Enter the line.'; return; }
+    if (!costInput.value) { errEl.textContent = 'Enter the amount bet.'; return; }
+
+    const g = gamesForDate.find(x => x.id === matchupSel.value);
+    const sideLabelText = sideSel.options[sideSel.selectedIndex] ? sideSel.options[sideSel.selectedIndex].textContent : sideSel.value;
+    let selectionText;
+    if (betTypeSel.value === 'total') selectionText = (sideSel.value === 'OVER' ? 'Over' : 'Under') + ' ' + lineInput.value;
+    else if (betTypeSel.value === 'moneyline') selectionText = sideLabelText + ' ML';
+    else selectionText = sideLabelText + ' ' + (parseFloat(lineInput.value) > 0 ? '+' + lineInput.value : lineInput.value);
+
     if (!kalshiPendingExtraction) kalshiPendingExtraction = [];
     kalshiPendingExtraction.push({
       _tempId: 'temp_' + Date.now(),
-      book: '', matchup: '', selection: '',
-      cost: 0, payout: null, maxPayout: null,
-      status: 'open', placedAt: null,
-      matchedSport: null, matchedGameId: null
+      book: bookSel.value, matchup: matchupText, selection: selectionText,
+      cost: parseFloat(costInput.value) || 0,
+      payout: payoutInput.value === '' ? null : parseFloat(payoutInput.value),
+      maxPayout: null,
+      status: payoutInput.value === '' ? 'open' : 'settled',
+      placedAt: dateInput.value || null,
+      matchedSport: g ? leagueSel.value : null, matchedGameId: g ? g.id : null
     });
+    trackerWizardOpen = false;
     render();
   };
+  card.appendChild(addBtn);
+
+  const cancelBtn = el('button', null, 'Cancel');
+  cancelBtn.style.cssText = 'margin-top:8px;width:100%;background:none;border:1px solid var(--border);color:var(--text-faint);font-size:12px;padding:8px;border-radius:6px;';
+  cancelBtn.onclick = () => { trackerWizardOpen = false; render(); };
+  card.appendChild(cancelBtn);
+
+  return card;
+}
+
+function renderKalshiSection() {
+  const wrap = el('div');
+  wrap.appendChild(el('div', 'setup-hint', "Log bets from any sportsbook or prediction market — pick the date, league, and real matchup, then just type the line, amount, and payout. Nothing here touches your real accounts."));
+
+  if (trackerWizardOpen) {
+    wrap.appendChild(renderTrackerWizard());
+    return wrap;
+  }
+
+  const addBtn = el('button', 'lock-btn', '+ Add a bet');
+  addBtn.style.marginBottom = '4px';
+  addBtn.onclick = () => { trackerWizardOpen = true; render(); };
   wrap.appendChild(addBtn);
 
   if (kalshiPendingExtraction && kalshiPendingExtraction.length) {
