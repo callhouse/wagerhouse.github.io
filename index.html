@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Wager Wire</title>
+<title>CallHouse</title>
 <style>
   :root {
     --bg: #0A0C0D; --surface: #15181A; --surface-2: #1E2224; --border: #2A2F31;
@@ -129,7 +129,7 @@
 <div id="app">
   <header class="top">
     <div class="row1">
-      <h1>Wager<span>Wire</span></h1>
+      <h1>Call<span>House</span></h1>
       <span class="who" id="whoLabel"></span>
     </div>
     <div class="tabbar" id="sectionSwitch"></div>
@@ -248,7 +248,6 @@ let appSection = 'daily'; // 'daily' | 'pools'
 let dailyRoundSelected = new Set(); // gameIds chosen for today's round during the guessing phase (pre-commit)
 let dailyRoundGuesses = {}; // gameId -> in-progress slider value, unsaved until committed
 let dailyShowHistory = false;
-const DAILY_BUDGET = 10;
 let setupError = '';
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -491,7 +490,7 @@ function statusInfo(status, liveDetail) {
   return { text: 'Upcoming', live: false };
 }
 
-// ---------- Daily Challenge: one unified round (guess lines, then bet against them) ----------
+// ---------- Daily Challenge: guess the spread on 5+ games, score = total points off ----------
 function todayKey() { return new Date().toDateString(); }
 
 function eligibleTodayGames() {
@@ -514,27 +513,13 @@ function eligibleTodayGames() {
 function todaysRoundEntries(name) {
   return allPicks.filter(p => p.player === name && p.poolType === 'daily' && p.dayKey === todayKey());
 }
-function roundUnitsUsed(entries) { return entries.reduce((s,p) => s + (p.units || 0), 0); }
-function roundPhase(entries) {
-  if (!entries.length) return 'guess';
-  if (roundUnitsUsed(entries) < DAILY_BUDGET) return 'bet';
-  return 'done';
-}
+function roundPhase(entries) { return entries.length >= 5 ? 'done' : 'guess'; }
 function pointsOffFor(entry) {
   if (entry.actualSpread === null || entry.actualSpread === undefined) return 0;
   return Math.abs(entry.guess - entry.actualSpread);
 }
 function roundScoreFor(entries) {
-  let total = 0, allSettled = true;
-  entries.forEach(p => {
-    total += pointsOffFor(p);
-    if (p.units > 0 && p.sideAbbr) {
-      const r = settlePick(p);
-      if (r.status === 'loss') total += p.units;
-      else if (r.status === 'pending') allSettled = false;
-    }
-  });
-  return { total, allSettled };
+  return entries.reduce((s,p) => s + pointsOffFor(p), 0);
 }
 function bestRoundEver() {
   const groups = {};
@@ -545,9 +530,8 @@ function bestRoundEver() {
   let best = null;
   Object.keys(groups).forEach(key => {
     const entries = groups[key];
-    if (roundUnitsUsed(entries) < DAILY_BUDGET) return; // round not finished
-    const { total, allSettled } = roundScoreFor(entries);
-    if (!allSettled) return;
+    if (entries.length < 5) return; // round not finished
+    const total = roundScoreFor(entries);
     const [player, day] = key.split('|');
     if (best === null || total < best.total) best = { player, day, total };
   });
@@ -579,7 +563,6 @@ function spreadExplainer(value, homeAbbr, awayAbbr) {
   return `Bet = ${favTeam} win by ${Math.ceil(mag)} or more`;
 }
 
-// shared: expandable round detail list (guess/actual/pts-off + bet outcome if placed)
 function renderRoundDetailList(entries) {
   const detail = el('div');
   detail.style.cssText = 'margin-top:10px;';
@@ -587,15 +570,8 @@ function renderRoundDetailList(entries) {
     const pts = pointsOffFor(p);
     const line = el('div');
     line.style.cssText = 'font-size:12px;color:var(--text-dim);padding:7px 2px;border-bottom:1px solid var(--border);';
-    let betPart = '<span style="color:var(--text-faint);">no bet</span>';
-    if (p.units > 0 && p.sideAbbr) {
-      const r = settlePick(p);
-      const resTxt = r.status === 'win' ? 'Covered' : r.status === 'loss' ? 'No cover (+' + p.units + ' pts)' : r.status === 'push' ? 'Push' : 'Pending';
-      const color = r.status === 'win' ? 'var(--accent)' : r.status === 'loss' ? 'var(--danger)' : 'var(--gold)';
-      betPart = `${p.sideAbbr}${p.spreadLabel ? ' ' + p.spreadLabel : ''} · ${p.units}u — <span style="color:${color};font-weight:700;">${resTxt}</span>`;
-    }
-    line.innerHTML = `<div style="display:flex;justify-content:space-between;"><span>${p.gameLabel}</span><span style="font-family:var(--font-mono);">${pts.toFixed(1)} pts off</span></div>
-      <div style="margin-top:3px;font-family:var(--font-mono);font-size:11px;">${betPart}</div>`;
+    line.innerHTML = `<div style="display:flex;justify-content:space-between;"><span>${p.gameLabel}</span><span style="font-family:var(--font-mono);color:var(--accent);font-weight:700;">${pts.toFixed(1)} pts off</span></div>
+      <div style="margin-top:3px;font-family:var(--font-mono);font-size:11px;">You: ${guessLabel(p.guess, p.home, p.away)} · Actual: ${p.actualSpread === null ? 'no line' : guessLabel(p.actualSpread, p.home, p.away)}</div>`;
     detail.appendChild(line);
   });
   return detail;
@@ -609,7 +585,7 @@ function renderRoundGuessPhase() {
     wrap.appendChild(el('div', 'empty', 'No games with a posted line today — check back later.'));
     return wrap;
   }
-  wrap.appendChild(el('div', 'setup-hint', `Add at least 5 games, guess each line, then lock them in. You'll bet a total of ${DAILY_BUDGET} units against the real lines next.`));
+  wrap.appendChild(el('div', 'setup-hint', `Add at least 5 games and guess each line. Your score is the total points you're off by — lower is better.`));
 
   const counter = el('div', 'rank-banner');
   const cc = el('div', 'rank-cell');
@@ -671,7 +647,7 @@ function renderRoundGuessPhase() {
     wrap.appendChild(card);
   });
 
-  lockBtn = el('button', 'lock-btn', `Lock in ${dailyRoundSelected.size} line${dailyRoundSelected.size === 1 ? '' : 's'}`);
+  lockBtn = el('button', 'lock-btn', `Submit ${dailyRoundSelected.size} line${dailyRoundSelected.size === 1 ? '' : 's'}`);
   lockBtn.style.marginTop = '10px';
   lockBtn.disabled = dailyRoundSelected.size < 5;
   const errEl = el('div', 'pick-error');
@@ -684,7 +660,6 @@ function renderRoundGuessPhase() {
       gameLabel: game.away + ' @ ' + game.home, home: game.home, away: game.away,
       guess: dailyRoundGuesses[game.id] !== undefined ? dailyRoundGuesses[game.id] : 0,
       actualSpread: computeSpread(sport, game),
-      sideAbbr: null, units: 0, spreadLabel: null,
       poolType: 'daily', dayKey: todayKey(),
       timestamp: new Date().toISOString()
     }));
@@ -696,7 +671,7 @@ function renderRoundGuessPhase() {
       render();
     } catch (e) {
       allPicks.length = prevLen;
-      lockBtn.disabled = false; lockBtn.textContent = `Lock in ${dailyRoundSelected.size} lines`;
+      lockBtn.disabled = false; lockBtn.textContent = `Submit ${dailyRoundSelected.size} lines`;
       errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
     }
   };
@@ -705,143 +680,27 @@ function renderRoundGuessPhase() {
   return wrap;
 }
 
-// ---------- Phase: bet ----------
-function renderRoundBetPhase(entries) {
-  const wrap = el('div');
-  const used = roundUnitsUsed(entries);
-  const remaining = Math.max(0, DAILY_BUDGET - used);
-
-  const banner = el('div', 'rank-banner');
-  const b1 = el('div', 'rank-cell');
-  b1.appendChild(el('div', 'rc-label', 'Units left to bet'));
-  b1.appendChild(el('div', 'rc-value accent', remaining.toFixed(1) + 'u'));
-  b1.appendChild(el('div', 'rc-sub', used.toFixed(1) + ' of ' + DAILY_BUDGET + 'u placed'));
-  banner.appendChild(b1);
-  wrap.appendChild(banner);
-  wrap.appendChild(el('div', 'setup-hint', 'Lines are revealed — pick a side and wager units on however many you like, until all ' + DAILY_BUDGET + ' are placed.'));
-
-  entries.slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(entry => {
-    const card = el('div', 'event-card');
-    card.appendChild(el('div', 'event-meta', entry.gameLabel));
-    const pts = pointsOffFor(entry);
-    const compareRow = el('div');
-    compareRow.style.cssText = 'display:flex;justify-content:space-between;margin:8px 0;font-family:var(--font-mono);font-size:12.5px;';
-    compareRow.innerHTML = `<span>You: ${guessLabel(entry.guess, entry.home, entry.away)}</span><span>Actual: ${entry.actualSpread === null ? 'no line' : guessLabel(entry.actualSpread, entry.home, entry.away)}</span>`;
-    card.appendChild(compareRow);
-    card.appendChild(el('div', null, pts.toFixed(1) + ' pts off on your line guess')).style.cssText = 'text-align:center;font-size:11px;color:var(--text-faint);margin-bottom:10px;';
-
-    if (entry.units > 0 && entry.sideAbbr) {
-      const note = el('div', 'locked-note');
-      note.appendChild(el('div', 'ln-title', 'Your bet'));
-      note.innerHTML += `${entry.sideAbbr}${entry.spreadLabel ? ' ' + entry.spreadLabel : ''} · <b>${entry.units}u</b> risked`;
-      card.appendChild(note);
-      wrap.appendChild(card);
-      return;
-    }
-
-    if (remaining <= 0) {
-      card.appendChild(el('div', 'no-odds-note', 'Budget fully placed — this one goes unbet'));
-      wrap.appendChild(card);
-      return;
-    }
-
-    const grid = el('div', 'outcome-grid');
-    let lockBtn;
-    [entry.away, entry.home].forEach(ab => {
-      const btn = el('div', 'outcome-btn' + (dailyRoundGuesses['_bet_' + entry.id] === ab ? ' selected' : ''));
-      const val = ab === entry.home ? entry.actualSpread : -entry.actualSpread;
-      const label = entry.actualSpread === null ? 'ML' : (val === 0 ? 'PK' : (val > 0 ? '+' + val : val.toString()));
-      btn.innerHTML = `<div class="oc-team">${ab}</div><div class="oc-line">${label}</div>`;
-      btn.onclick = () => {
-        dailyRoundGuesses['_bet_' + entry.id] = ab;
-        grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        lockBtn.disabled = false;
-        lockBtn.textContent = 'Lock pick: ' + ab;
-      };
-      grid.appendChild(btn);
-    });
-    card.appendChild(grid);
-
-    const slip = el('div', 'bet-slip');
-    const bsRow = el('div', 'bs-row');
-    bsRow.appendChild(el('label', null, 'Units'));
-    const unitsInput = el('input');
-    unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.max = String(remaining);
-    unitsInput.value = String(Math.min(2, remaining));
-    bsRow.appendChild(unitsInput);
-    slip.appendChild(bsRow);
-    lockBtn = el('button', 'lock-btn', 'Select a side');
-    lockBtn.disabled = true;
-    slip.appendChild(lockBtn);
-    const errEl = el('div', 'pick-error');
-    slip.appendChild(errEl);
-    card.appendChild(slip);
-
-    lockBtn.onclick = async () => {
-      const ab = dailyRoundGuesses['_bet_' + entry.id];
-      const units = parseFloat(unitsInput.value);
-      errEl.textContent = '';
-      if (!ab) { errEl.textContent = 'Pick a side first.'; return; }
-      if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
-      if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left to place.`; return; }
-      const idxInAll = allPicks.findIndex(p => p.id === entry.id);
-      if (idxInAll === -1) { errEl.textContent = 'Could not find this pick — try reloading.'; return; }
-      const prevState = { ...allPicks[idxInAll] };
-      const val = ab === entry.home ? entry.actualSpread : -entry.actualSpread;
-      const label = entry.actualSpread === null ? null : (val === 0 ? 'PK' : (val > 0 ? '+' + val : val.toString()));
-      allPicks[idxInAll].sideAbbr = ab;
-      allPicks[idxInAll].units = units;
-      allPicks[idxInAll].spreadLabel = label;
-      lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
-      try {
-        await savePicks(allPicks);
-        render();
-      } catch (e) {
-        allPicks[idxInAll] = prevState;
-        lockBtn.disabled = false; lockBtn.textContent = 'Lock pick: ' + ab;
-        errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
-      }
-    };
-
-    wrap.appendChild(card);
-  });
-
-  return wrap;
-}
-
 // ---------- Phase: done ----------
 function renderRoundDonePhase(entries) {
   const wrap = el('div');
-  const { total, allSettled } = roundScoreFor(entries);
+  const total = roundScoreFor(entries);
   const banner = el('div', 'rank-banner');
   const c1 = el('div', 'rank-cell');
-  c1.appendChild(el('div', 'rc-label', allSettled ? "Today's score" : "Today's score (so far)"));
+  c1.appendChild(el('div', 'rc-label', "Today's score"));
   c1.appendChild(el('div', 'rc-value accent', total.toFixed(1)));
-  c1.appendChild(el('div', 'rc-sub', allSettled ? 'Final — lower is better' : 'Some games still pending'));
+  c1.appendChild(el('div', 'rc-sub', entries.length + ' games · lower is better'));
   banner.appendChild(c1);
   wrap.appendChild(banner);
-  wrap.appendChild(el('div', 'week-header', "Today's round (tap to expand)"));
+  wrap.appendChild(el('div', 'week-header', "Today's guesses (tap to expand)"));
   const summary = el('div', 'event-card');
   summary.style.cursor = 'pointer';
-  const bar = el('div');
-  bar.style.cssText = 'display:flex;height:24px;border-radius:6px;overflow:hidden;background:var(--surface-2);';
-  entries.forEach(p => {
-    if (!(p.units > 0 && p.sideAbbr)) return;
-    const r = settlePick(p);
-    const color = r.status === 'win' ? 'var(--accent)' : r.status === 'loss' ? 'var(--danger)' : 'var(--gold)';
-    const seg = el('div'); seg.style.cssText = `flex:${p.units} 0 0;background:${color};border-right:1px solid var(--bg);`;
-    bar.appendChild(seg);
-  });
-  const unbet = DAILY_BUDGET - roundUnitsUsed(entries);
-  if (unbet > 0) { const seg = el('div'); seg.style.cssText = `flex:${unbet} 0 0;background:var(--border);`; bar.appendChild(seg); }
-  summary.appendChild(bar);
+  summary.appendChild(el('div', null, 'Guessed ' + entries.length + ' line' + (entries.length === 1 ? '' : 's') + ' today')).style.cssText = 'font-size:13px;color:var(--text-dim);';
   const detail = renderRoundDetailList(entries);
   detail.style.display = 'none';
   summary.onclick = () => { detail.style.display = detail.style.display === 'none' ? 'block' : 'none'; };
   summary.appendChild(detail);
   wrap.appendChild(summary);
-  wrap.appendChild(el('div', 'refresh-note', 'Come back tomorrow for a new round. Scores update automatically as today\'s games finish.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Come back tomorrow for a new round of lines.'));
   return wrap;
 }
 
@@ -860,14 +719,12 @@ function renderRoundHistory() {
     return wrap;
   }
   days.forEach(({ day, entries }) => {
-    const { total, allSettled } = roundScoreFor(entries);
-    const finished = roundUnitsUsed(entries) >= DAILY_BUDGET;
+    const total = roundScoreFor(entries);
     const card = el('div', 'event-card');
     const top = el('div');
     top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;';
     const dayLabel = new Date(day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    const scoreTxt = finished ? total.toFixed(1) + (allSettled ? '' : '*') : 'incomplete';
-    top.innerHTML = `<div style="font-size:14px;font-weight:800;">${dayLabel}</div><div style="font-family:var(--font-mono);font-weight:800;color:var(--accent);">${scoreTxt}</div>`;
+    top.innerHTML = `<div style="font-size:14px;font-weight:800;">${dayLabel}</div><div style="font-family:var(--font-mono);font-weight:800;color:var(--accent);">${total.toFixed(1)}</div>`;
     card.appendChild(top);
     card.style.cursor = 'pointer';
     const detail = renderRoundDetailList(entries);
@@ -897,7 +754,6 @@ function renderDailyChallenge() {
   const entries = todaysRoundEntries(profile.name);
   const phase = roundPhase(entries);
   if (phase === 'guess') wrap.appendChild(renderRoundGuessPhase());
-  else if (phase === 'bet') wrap.appendChild(renderRoundBetPhase(entries));
   else wrap.appendChild(renderRoundDonePhase(entries));
   return wrap;
 }
