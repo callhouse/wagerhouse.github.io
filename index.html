@@ -102,6 +102,8 @@
   .result.win { color: var(--accent); }
   .result.loss { color: var(--danger); }
   .result.pending { color: var(--gold); }
+  .result.profit-pos { color: #4CAF50; }
+  .result.profit-neg { color: var(--danger); }
 
   .week-header { font-size: 12.5px; font-weight: 800; color: var(--text-dim); margin: 18px 0 2px; text-transform: uppercase; letter-spacing: 0.03em; }
   .week-header:first-child { margin-top: 8px; }
@@ -1017,12 +1019,12 @@ function renderProfitTrendBareSVG(days) {
   const fmtDate = k => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const labelIdxs = n <= 4 ? days.map((_,i) => i) : [0, Math.floor((n-1)/2), n-1];
   const labels = labelIdxs.map(i => `<text x="${xScale(i).toFixed(1)}" y="${h - 6}" font-size="9" text-anchor="middle" style="fill:var(--text-faint)" font-family="var(--font-mono)">${fmtDate(days[i].dateKey)}</text>`).join('');
-  const dots = pts.map((v,i) => `<circle cx="${xScale(i).toFixed(1)}" cy="${yScale(v).toFixed(1)}" r="3" style="fill:${last >= 0 ? 'var(--accent)' : 'var(--danger)'}"/>`).join('');
+  const dots = pts.map((v,i) => `<circle cx="${xScale(i).toFixed(1)}" cy="${yScale(v).toFixed(1)}" r="3" style="fill:${last >= 0 ? '#4CAF50' : 'var(--danger)'}"/>`).join('');
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">
     <line x1="${padL}" y1="${zeroY}" x2="${padL + innerW}" y2="${zeroY}" style="stroke:var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
     <text x="2" y="${zeroY + 3}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">$0</text>
     <text x="2" y="${padT + 8}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">${maxV.toFixed(0)}</text>
-    <path d="${d}" fill="none" style="stroke:${last >= 0 ? 'var(--accent)' : 'var(--danger)'}" stroke-width="2"/>
+    <path d="${d}" fill="none" style="stroke:${last >= 0 ? '#4CAF50' : 'var(--danger)'}" stroke-width="2"/>
     ${dots}
     ${labels}
   </svg>`;
@@ -1057,6 +1059,7 @@ function renderProfitChart(days) {
 function renderTrackerWizard() {
   const card = el('div', 'event-card');
   card.style.padding = '16px';
+  card.style.overflowX = 'hidden';
   card.appendChild(el('div', null, '📝 Log a bet')).style.cssText = 'font-size:14px;font-weight:700;margin-bottom:12px;';
 
   const dateRow = el('div'); dateRow.style.cssText = 'margin-bottom:10px;';
@@ -1064,7 +1067,7 @@ function renderTrackerWizard() {
   const dateInput = el('input'); dateInput.type = 'date';
   dateInput.max = new Date().toISOString().slice(0,10);
   dateInput.value = new Date().toISOString().slice(0,10);
-  dateInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
+  dateInput.style.cssText = 'width:100%;max-width:100%;box-sizing:border-box;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
   dateRow.appendChild(dateInput);
   card.appendChild(dateRow);
 
@@ -1097,13 +1100,10 @@ function renderTrackerWizard() {
   let gamesForDate = [];
 
   const step3 = el('div'); step3.style.display = 'none';
-  const row3 = el('div'); row3.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;';
-  const betTypeSel = el('select'); betTypeSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+  const row3 = el('div'); row3.style.cssText = 'margin-bottom:10px;';
+  const betTypeSel = el('select'); betTypeSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;box-sizing:border-box;';
   [['spread','Spread'],['total','Total'],['moneyline','Moneyline']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; betTypeSel.appendChild(o); });
   row3.appendChild(betTypeSel);
-  const bookSel = el('select'); bookSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
-  ['DraftKings','FanDuel','Kalshi','BetMGM','Caesars','ESPN Bet','Other'].forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; bookSel.appendChild(o); });
-  row3.appendChild(bookSel);
   step3.appendChild(row3);
 
   step3.appendChild(el('label', null, 'Your side')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
@@ -1204,7 +1204,7 @@ function renderTrackerWizard() {
     if (!kalshiPendingExtraction) kalshiPendingExtraction = [];
     kalshiPendingExtraction.push({
       _tempId: 'temp_' + Date.now(),
-      book: bookSel.value, matchup: matchupText, selection: selectionText,
+      matchup: matchupText, selection: selectionText,
       cost: parseFloat(costInput.value) || 0,
       payout: payoutInput.value === '' ? null : parseFloat(payoutInput.value),
       maxPayout: null,
@@ -1260,12 +1260,7 @@ function renderKalshiSection() {
       selInput.oninput = () => { bet.selection = selInput.value; };
       card.appendChild(selInput);
 
-      const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;';
-      const bookInput = el('input'); bookInput.value = bet.book; bookInput.placeholder = 'Book';
-      bookInput.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;';
-      bookInput.oninput = () => { bet.book = bookInput.value; };
-      row.appendChild(bookInput);
-
+      const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
       const costInput = el('input'); costInput.type = 'number'; costInput.value = bet.cost; costInput.placeholder = 'Cost $';
       costInput.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;';
       costInput.oninput = () => { bet.cost = parseFloat(costInput.value) || 0; };
@@ -1301,7 +1296,7 @@ function renderKalshiSection() {
       const newRecords = kalshiPendingExtraction.map(bet => ({
         id: profile.name + '_tracker_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
         player: profile.name, poolType: 'tracker',
-        book: bet.book || 'Unknown', matchup: bet.matchup, selection: bet.selection,
+        matchup: bet.matchup, selection: bet.selection,
         cost: bet.cost, payout: bet.payout, maxPayout: bet.maxPayout, status: bet.status,
         placedAt: bet.placedAt, matchedSport: bet.matchedSport, matchedGameId: bet.matchedGameId,
         homeAbbr: bet.homeAbbr || null, awayAbbr: bet.awayAbbr || null,
@@ -1388,7 +1383,7 @@ function renderKalshiSection() {
     const banner = el('div', 'rank-banner');
     const c1 = el('div', 'rank-cell');
     c1.appendChild(el('div', 'rc-label', 'Total profit'));
-    c1.appendChild(el('div', 'rc-value ' + (totalProfit >= 0 ? 'accent' : ''), '$' + totalProfit.toFixed(2)));
+    c1.appendChild(el('div', 'rc-value', '$' + totalProfit.toFixed(2))).style.color = totalProfit >= 0 ? '#4CAF50' : 'var(--danger)';
     c1.appendChild(el('div', 'rc-sub', settledEntries.length + ' settled bet' + (settledEntries.length === 1 ? '' : 's')));
     banner.appendChild(c1);
     wrap.appendChild(banner);
@@ -1408,12 +1403,12 @@ function renderKalshiSection() {
       const row = el('div', 'pick-row');
       const left = el('div');
       const dateTxt = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      left.appendChild(el('div', 'who', `<span class="pick-league">${p.book}</span> ${p.matchup}`));
+      left.appendChild(el('div', 'who', p.matchup));
       left.appendChild(el('div', 'detail', `${dateTxt} · ${p.selection} · $${p.cost.toFixed(2)} staked`));
       row.appendChild(left);
       const rightWrap = el('div'); rightWrap.style.cssText = 'display:flex;align-items:center;gap:10px;';
       let resTxt, cls;
-      if (profit !== null) { resTxt = (profit >= 0 ? '+$' : '-$') + Math.abs(profit).toFixed(2); cls = profit >= 0 ? 'win' : 'loss'; }
+      if (profit !== null) { resTxt = (profit >= 0 ? '+$' : '-$') + Math.abs(profit).toFixed(2); cls = profit >= 0 ? 'profit-pos' : 'profit-neg'; }
       else { resTxt = p.maxPayout !== null ? 'up to $' + p.maxPayout.toFixed(2) : 'Open'; cls = 'pending'; }
       rightWrap.appendChild(el('div', 'result ' + cls, resTxt));
       const delBtn = el('button', null, '✕');
