@@ -1211,7 +1211,8 @@ function renderTrackerWizard() {
       status: payoutInput.value === '' ? 'open' : 'settled',
       placedAt: dateInput.value || null,
       matchedSport: leagueSel.value || null, matchedGameId: g ? g.id : null,
-      homeAbbr: g ? g.home : null, awayAbbr: g ? g.away : null
+      homeAbbr: g ? g.home : null, awayAbbr: g ? g.away : null,
+      betSide: (betTypeSel.value === 'total') ? null : (g ? sideSel.value : null)
     });
     trackerWizardOpen = false;
     render();
@@ -1304,6 +1305,7 @@ function renderKalshiSection() {
         cost: bet.cost, payout: bet.payout, maxPayout: bet.maxPayout, status: bet.status,
         placedAt: bet.placedAt, matchedSport: bet.matchedSport, matchedGameId: bet.matchedGameId,
         homeAbbr: bet.homeAbbr || null, awayAbbr: bet.awayAbbr || null,
+        betSide: bet.betSide || null,
         timestamp: new Date().toISOString()
       }));
       newRecords.forEach(r => allPicks.push(r));
@@ -1356,11 +1358,11 @@ function renderKalshiSection() {
       wrap.appendChild(leagueScroller);
     }
 
-    // team filter dropdown — only teams appearing within the selected league
+    // team filter dropdown — only teams you actually bet on within the selected league
     if (trackerLeagueFilter) {
       const teamsPresent = [...new Set(
-        allHistory.filter(e => e.p.matchedSport === trackerLeagueFilter)
-          .flatMap(e => [e.p.homeAbbr, e.p.awayAbbr]).filter(Boolean)
+        allHistory.filter(e => e.p.matchedSport === trackerLeagueFilter && e.p.betSide)
+          .map(e => e.p.betSide)
       )].sort();
       if (teamsPresent.length) {
         const teamSel = el('select');
@@ -1376,7 +1378,7 @@ function renderKalshiSection() {
   const history = allHistory.filter(e => {
     if (!inTrackerDateRange(e.date, trackerDateFilter)) return false;
     if (trackerLeagueFilter && e.p.matchedSport !== trackerLeagueFilter) return false;
-    if (trackerTeamFilter && e.p.homeAbbr !== trackerTeamFilter && e.p.awayAbbr !== trackerTeamFilter) return false;
+    if (trackerTeamFilter && e.p.betSide !== trackerTeamFilter) return false;
     return true;
   });
   const settledEntries = history.filter(e => e.profit !== null);
