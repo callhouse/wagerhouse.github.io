@@ -501,6 +501,7 @@ function renderSetup() {
       saveProfile({ name });
       const g = await loadGlobalData();
       players = g.players; allPicks = g.picks;
+      await migrateLegacyWeeklyPicks();
       if (!players.includes(name)) { players.push(name); await savePlayers(players); }
       startPolling();
       startLiveScoreChecks();
@@ -752,7 +753,7 @@ function renderWeekGameCard(sport, game, remaining) {
           player: profile.name, sport, gameId: game.id,
           gameLabel: game.away + ' @ ' + game.home,
           betType, sideAbbr: side, line, units,
-          weekKey: wk,
+          weekKey: wk, poolType: 'weekly',
           timestamp: new Date().toISOString()
         };
         lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
@@ -1089,6 +1090,13 @@ async function persistNewlySettledPicks() {
 function potentialWin(p) { return p.units; }
 
 function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly'); }
+async function migrateLegacyWeeklyPicks() {
+  let changed = false;
+  allPicks.forEach(p => {
+    if (p.betType && !p.poolType) { p.poolType = 'weekly'; changed = true; }
+  });
+  if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; will retry next load */ } }
+}
 function currentProfit(name) {
   return poolOnly(allPicks.filter(p => p.player === name)).reduce((s,p) => {
     const r = settlePick(p);
@@ -1538,6 +1546,7 @@ function renderLeaderboard() {
     try {
       const g = await loadGlobalData();
       players = g.players; allPicks = g.picks;
+      await migrateLegacyWeeklyPicks();
       if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
       startPolling();
       startLiveScoreChecks();
