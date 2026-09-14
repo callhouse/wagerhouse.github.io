@@ -259,6 +259,9 @@ let lbLeagueFilter = null; // null = all leagues; else a single sport id
 let appSection = 'daily'; // 'daily' | 'pools' | 'kalshi'
 let kalshiPendingExtraction = null; // array of draft bets being entered, or null
 let trackerWizardOpen = false;
+let trackerDateFilter = 'all'; // 'week' | 'month' | 'year' | 'all' | a specific 'YYYY-MM-DD'
+let trackerLeagueFilter = null; // sport id or null
+let trackerTeamFilter = null; // team abbr or null
 let trackerWizard = {}; // in-progress wizard state, reset each time the wizard opens
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
 let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
@@ -973,23 +976,32 @@ function betProfit(p) {
   if (p.status !== 'settled' || p.payout === null || p.payout === undefined) return null;
   return p.payout - p.cost;
 }
+function localDateKey(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function trackerHistoryChronological(name) {
   return trackerBetsFor(name)
-    .map(p => ({ p, profit: betProfit(p), date: p.placedAt ? new Date(p.placedAt) : new Date(p.timestamp) }))
+    .map(p => ({ p, profit: betProfit(p), date: p.placedAt ? new Date(p.placedAt + 'T00:00:00') : new Date(p.timestamp) }))
     .sort((a,b) => a.date - b.date);
+}
+function inTrackerDateRange(date, mode) {
+  if (mode === 'all') return true;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(mode)) return localDateKey(date) === mode;
+  const now = new Date();
+  if (mode === 'week') return weekKey(date) === weekKey(now);
+  if (mode === 'month') return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  if (mode === 'year') return date.getFullYear() === now.getFullYear();
+  return true;
 }
 function trackerDailyTotals(entries) {
   const settled = entries.filter(e => e.profit !== null);
   const byDay = {};
   settled.forEach(e => {
-    const key = e.date.toISOString().slice(0,10);
+    const key = localDateKey(e.date);
     byDay[key] = (byDay[key] || 0) + e.profit;
   });
   return Object.keys(byDay).sort().map(key => ({ dateKey: key, profit: byDay[key] }));
 }
-function renderProfitTrendSVG(entries) {
-  const days = trackerDailyTotals(entries);
-  if (!days.length) return '<div class="empty" style="padding:24px 10px;">No settled bets yet.</div>';
+function renderProfitTrendBareSVG(days) {
+  if (!days.length) return '<div class="empty" style="padding:24px 10px;">No settled bets in this range.</div>';
   const w = 320, h = 150, padL = 38, padR = 8, padT = 10, padB = 28;
   const innerW = w - padL - padR, innerH = h - padT - padB;
   let cum = 0;
@@ -1005,13 +1017,41 @@ function renderProfitTrendSVG(entries) {
   const fmtDate = k => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const labelIdxs = n <= 4 ? days.map((_,i) => i) : [0, Math.floor((n-1)/2), n-1];
   const labels = labelIdxs.map(i => `<text x="${xScale(i).toFixed(1)}" y="${h - 6}" font-size="9" text-anchor="middle" style="fill:var(--text-faint)" font-family="var(--font-mono)">${fmtDate(days[i].dateKey)}</text>`).join('');
+  const dots = pts.map((v,i) => `<circle cx="${xScale(i).toFixed(1)}" cy="${yScale(v).toFixed(1)}" r="3" style="fill:${last >= 0 ? 'var(--accent)' : 'var(--danger)'}"/>`).join('');
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">
     <line x1="${padL}" y1="${zeroY}" x2="${padL + innerW}" y2="${zeroY}" style="stroke:var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
     <text x="2" y="${zeroY + 3}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">$0</text>
     <text x="2" y="${padT + 8}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">${maxV.toFixed(0)}</text>
     <path d="${d}" fill="none" style="stroke:${last >= 0 ? 'var(--accent)' : 'var(--danger)'}" stroke-width="2"/>
+    ${dots}
     ${labels}
   </svg>`;
+}
+function renderProfitChart(days) {
+  const container = el('div');
+  container.style.cssText = 'position:relative;';
+  const svgHolder = el('div');
+  svgHolder.innerHTML = renderProfitTrendBareSVG(days);
+  container.appendChild(svgHolder);
+  if (days.length) {
+    const W = 320, padL = 38, padR = 8;
+    const innerW = W - padL - padR;
+    const n = days.length;
+    const xScale = i => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+    const slotWidthPct = Math.max((innerW / W) * 100 / n, 4);
+    const overlay = el('div');
+    overlay.style.cssText = 'position:absolute;inset:0;';
+    days.forEach((day, i) => {
+      const pct = (xScale(i) / W) * 100;
+      const btn = el('div');
+      btn.style.cssText = `position:absolute;top:0;bottom:0;left:${(pct - slotWidthPct/2).toFixed(2)}%;width:${slotWidthPct.toFixed(2)}%;cursor:pointer;`;
+      btn.title = day.dateKey;
+      btn.onclick = () => { trackerDateFilter = day.dateKey; render(); };
+      overlay.appendChild(btn);
+    });
+    container.appendChild(overlay);
+  }
+  return container;
 }
 
 function renderTrackerWizard() {
@@ -1170,7 +1210,8 @@ function renderTrackerWizard() {
       maxPayout: null,
       status: payoutInput.value === '' ? 'open' : 'settled',
       placedAt: dateInput.value || null,
-      matchedSport: g ? leagueSel.value : null, matchedGameId: g ? g.id : null
+      matchedSport: g ? leagueSel.value : null, matchedGameId: g ? g.id : null,
+      homeAbbr: g ? g.home : null, awayAbbr: g ? g.away : null
     });
     trackerWizardOpen = false;
     render();
@@ -1262,6 +1303,7 @@ function renderKalshiSection() {
         book: bet.book || 'Unknown', matchup: bet.matchup, selection: bet.selection,
         cost: bet.cost, payout: bet.payout, maxPayout: bet.maxPayout, status: bet.status,
         placedAt: bet.placedAt, matchedSport: bet.matchedSport, matchedGameId: bet.matchedGameId,
+        homeAbbr: bet.homeAbbr || null, awayAbbr: bet.awayAbbr || null,
         timestamp: new Date().toISOString()
       }));
       newRecords.forEach(r => allPicks.push(r));
@@ -1279,11 +1321,68 @@ function renderKalshiSection() {
     return wrap;
   }
 
-  const history = trackerHistoryChronological(profile.name);
+  const allHistory = trackerHistoryChronological(profile.name);
+
+  if (allHistory.length) {
+    // date range chips
+    const dateScroller = el('div', 'league-scroller');
+    [['week','This week'], ['month','This month'], ['year','This year'], ['all','All time']].forEach(([mode,label]) => {
+      const isSpecificDay = /^\d{4}-\d{2}-\d{2}$/.test(trackerDateFilter);
+      const pill = el('button', 'league-pill' + (!isSpecificDay && trackerDateFilter === mode ? ' active' : ''), label);
+      pill.onclick = () => { trackerDateFilter = mode; render(); };
+      dateScroller.appendChild(pill);
+    });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trackerDateFilter)) {
+      const dayLabel = new Date(trackerDateFilter + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const pill = el('button', 'league-pill active', dayLabel + ' ✕');
+      pill.onclick = () => { trackerDateFilter = 'all'; render(); };
+      dateScroller.appendChild(pill);
+    }
+    wrap.appendChild(dateScroller);
+
+    // league filter chips
+    const leaguesPresent = [...new Set(allHistory.map(e => e.p.matchedSport).filter(Boolean))];
+    if (leaguesPresent.length) {
+      const leagueScroller = el('div', 'league-scroller');
+      const allPill = el('button', 'league-pill' + (trackerLeagueFilter === null ? ' active' : ''), 'All leagues');
+      allPill.onclick = () => { trackerLeagueFilter = null; trackerTeamFilter = null; render(); };
+      leagueScroller.appendChild(allPill);
+      leaguesPresent.forEach(sport => {
+        const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || sport.toUpperCase();
+        const pill = el('button', 'league-pill' + (trackerLeagueFilter === sport ? ' active' : ''), label);
+        pill.onclick = () => { trackerLeagueFilter = sport; trackerTeamFilter = null; render(); };
+        leagueScroller.appendChild(pill);
+      });
+      wrap.appendChild(leagueScroller);
+    }
+
+    // team filter dropdown — only teams appearing within the selected league
+    if (trackerLeagueFilter) {
+      const teamsPresent = [...new Set(
+        allHistory.filter(e => e.p.matchedSport === trackerLeagueFilter)
+          .flatMap(e => [e.p.homeAbbr, e.p.awayAbbr]).filter(Boolean)
+      )].sort();
+      if (teamsPresent.length) {
+        const teamSel = el('select');
+        teamSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin:0 0 10px;';
+        const anyOpt = document.createElement('option'); anyOpt.value = ''; anyOpt.textContent = 'All teams'; teamSel.appendChild(anyOpt);
+        teamsPresent.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; if (trackerTeamFilter === t) o.selected = true; teamSel.appendChild(o); });
+        teamSel.onchange = () => { trackerTeamFilter = teamSel.value || null; render(); };
+        wrap.appendChild(teamSel);
+      }
+    }
+  }
+
+  const history = allHistory.filter(e => {
+    if (!inTrackerDateRange(e.date, trackerDateFilter)) return false;
+    if (trackerLeagueFilter && e.p.matchedSport !== trackerLeagueFilter) return false;
+    if (trackerTeamFilter && e.p.homeAbbr !== trackerTeamFilter && e.p.awayAbbr !== trackerTeamFilter) return false;
+    return true;
+  });
   const settledEntries = history.filter(e => e.profit !== null);
   const totalProfit = settledEntries.reduce((s,e) => s + e.profit, 0);
 
-  if (history.length) {
+  if (allHistory.length) {
     const banner = el('div', 'rank-banner');
     const c1 = el('div', 'rank-cell');
     c1.appendChild(el('div', 'rc-label', 'Total profit'));
@@ -1291,15 +1390,17 @@ function renderKalshiSection() {
     c1.appendChild(el('div', 'rc-sub', settledEntries.length + ' settled bet' + (settledEntries.length === 1 ? '' : 's')));
     banner.appendChild(c1);
     wrap.appendChild(banner);
-    wrap.appendChild(el('div', 'week-header', 'Profit over time'));
+    wrap.appendChild(el('div', 'week-header', 'Profit over time (tap a point to filter that day)'));
     const chartCard = el('div', 'event-card');
-    chartCard.innerHTML = renderProfitTrendSVG(history);
+    chartCard.appendChild(renderProfitChart(trackerDailyTotals(history)));
     wrap.appendChild(chartCard);
   }
 
-  wrap.appendChild(el('div', 'week-header', 'All tracked bets'));
-  if (!history.length) {
-    wrap.appendChild(el('div', 'empty', 'No bets tracked yet — upload a screenshot above.'));
+  wrap.appendChild(el('div', 'week-header', 'Tracked bets'));
+  if (!allHistory.length) {
+    wrap.appendChild(el('div', 'empty', 'No bets tracked yet — add one above.'));
+  } else if (!history.length) {
+    wrap.appendChild(el('div', 'empty', 'No bets match these filters.'));
   } else {
     history.slice().reverse().forEach(({ p, profit, date }) => {
       const row = el('div', 'pick-row');
