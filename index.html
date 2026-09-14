@@ -653,8 +653,20 @@ function renderWeeklyBetsBar(bets) {
     const color = r.status === 'win' ? 'var(--accent)' : r.status === 'loss' ? 'var(--danger)' : 'var(--gold)';
     const marketTxt = p.betType === 'total' ? (p.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + p.line : p.sideAbbr + ' ' + (p.line > 0 ? '+' + p.line : p.line);
     const line = el('div');
-    line.style.cssText = 'font-size:12px;color:var(--text-dim);padding:7px 2px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;';
-    line.innerHTML = `<span>${chipsFor(p.units)} ${p.gameLabel} — ${marketTxt} · ${p.units}u</span><span style="color:${color};font-weight:700;white-space:nowrap;">${resTxt}</span>`;
+    line.style.cssText = 'font-size:12px;color:var(--text-dim);padding:7px 2px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;';
+    const infoSpan = el('span', null, `${chipsFor(p.units)} ${p.gameLabel} — ${marketTxt} · ${p.units}u`);
+    line.appendChild(infoSpan);
+    const rightWrap = el('div');
+    rightWrap.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    rightWrap.appendChild(el('span', null, resTxt)).style.cssText = `color:${color};font-weight:700;white-space:nowrap;`;
+    const idx = gameIndex[p.gameId];
+    if (idx && idx.game.status === 'scheduled') {
+      const delBtn = el('button', null, '✕');
+      delBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:24px;height:24px;font-size:11px;flex-shrink:0;';
+      delBtn.onclick = (ev) => { ev.stopPropagation(); if (confirm('Delete this bet? Your units will return to the bank.')) deletePick(p.id); };
+      rightWrap.appendChild(delBtn);
+    }
+    line.appendChild(rightWrap);
     detail.appendChild(line);
   });
   bar.onclick = () => { detail.style.display = detail.style.display === 'none' ? 'block' : 'none'; };
@@ -684,8 +696,19 @@ function renderWeekGameCard(sport, game, remaining) {
     if (existingBet) {
       const note = el('div', 'locked-note');
       const marketTxt = betType === 'total' ? (existingBet.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existingBet.line : existingBet.sideAbbr + ' ' + (existingBet.line > 0 ? '+' + existingBet.line : existingBet.line);
-      note.innerHTML = `<div class="ln-title">Your bet</div>${chipsFor(existingBet.units)} ${marketTxt} · <b>${existingBet.units}u</b>`;
+      note.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+      const infoDiv = el('div');
+      infoDiv.innerHTML = `<div class="ln-title">Your bet</div>${chipsFor(existingBet.units)} ${marketTxt} · <b>${existingBet.units}u</b>`;
+      note.appendChild(infoDiv);
+      const delBtn = el('button', null, '✕');
+      delBtn.style.cssText = 'background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;width:28px;height:28px;font-size:13px;flex-shrink:0;';
+      delBtn.onclick = () => { if (confirm('Delete this bet? Your units will return to the bank.')) deletePick(existingBet.id); };
+      note.appendChild(delBtn);
       section.appendChild(note);
+      return section;
+    }
+    if (myBets.length > 0) {
+      section.appendChild(el('div', 'no-odds-note', 'Already bet on this game this week — one bet per game.'));
       return section;
     }
     if (remaining <= 0) { section.appendChild(el('div', 'no-odds-note', 'Bank empty this week')); return section; }
