@@ -271,7 +271,7 @@ let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (1
 let houseLeagueFilter = null; // null = all leagues; else a single sport id
 let dailyShowHistory = false; // reused as "show weekly history"
 const HOUSE_BANK_TOTAL = 100;
-const HOUSE_BET_CAP = 30;
+const HOUSE_BET_CAP = 10;
 const WH_RATING_BASE = 1500;
 let setupError = '';
 
@@ -553,8 +553,8 @@ function weekRangeLabel(wk) {
   return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '–' + end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 function chipsFor(units) {
-  if (units <= 10) return '\ud83d\udd25';
-  if (units <= 20) return '\ud83d\udd25\ud83d\udd25';
+  if (units <= 3) return '\ud83d\udd25';
+  if (units <= 7) return '\ud83d\udd25\ud83d\udd25';
   return '\ud83d\udd25\ud83d\udd25\ud83d\udd25';
 }
 
@@ -742,9 +742,9 @@ function renderWeekGameCard(sport, game, remaining) {
 
     const slip = el('div', 'bet-slip');
     const tierRow = el('div');
-    tierRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;';
-    [1, 2, 3].forEach(n => {
-      const tierUnits = n * 10;
+    tierRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px;';
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach(n => {
+      const tierUnits = n;
       const disabled = tierUnits > remaining;
       const btn = el('div', 'outcome-btn' + (weeklySelectedUnits[key] === tierUnits ? ' selected' : '') + (disabled ? ' disabled' : ''));
       btn.innerHTML = `<div class="oc-team">${chipsFor(tierUnits)}</div><div class="oc-line">${tierUnits}u</div>`;
@@ -928,7 +928,7 @@ function renderDailyChallenge() {
   } else {
     filteredGames.forEach(({ sport, game }) => wrap.appendChild(renderWeekGameCard(sport, game, remaining)));
   }
-  wrap.appendChild(el('div', 'refresh-note', `100 house units a week. Up to ${HOUSE_BET_CAP}u (3 🔥) on any one bet — straight spread or total, your call. Units lock once a game starts; whatever's left carries you through the rest of the week.`));
+  wrap.appendChild(el('div', 'refresh-note', `100 house units a week. Up to ${HOUSE_BET_CAP}u (10 confidence points) on any one bet — straight spread or total, your call. Units lock once a game starts; whatever's left carries you through the rest of the week.`));
   return wrap;
 }
 
