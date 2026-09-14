@@ -398,12 +398,21 @@ async function loadGlobalData() {
   } catch (e) { throw new Error(e.message || 'Firestore read failed'); }
 }
 async function savePlayers(list) { await fsPatch({ players: list }); }
-async function savePicks(picks) { await fsPatch({ picks: picks }); }
+let pendingSaveCount = 0;
+async function savePicks(picks) {
+  pendingSaveCount++;
+  try {
+    await fsPatch({ picks: picks });
+  } finally {
+    pendingSaveCount--;
+  }
+}
 
 let pollTimer = null;
 function startPolling() {
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
+    if (pendingSaveCount > 0) return; // a local write is still in flight — don't clobber it with a stale read
     try {
       const data = await fsGet();
       let changed = false;
