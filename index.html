@@ -215,6 +215,7 @@ async function fetchSportGames(sport) {
 }
 let gamesLoaded = false;
 async function refreshGameLists() {
+  const before = JSON.stringify(DATA);
   for (const sport of Object.keys(ESPN_PATHS)) {
     const meta = LEAGUES_META.find(l => l.id === sport);
     if (!meta || !meta.active) continue;
@@ -225,6 +226,7 @@ async function refreshGameLists() {
   }
   rebuildGameIndex();
   gamesLoaded = true;
+  return JSON.stringify(DATA) !== before;
 }
 
 let liveTimer = null;
@@ -232,10 +234,11 @@ function startLiveScoreChecks() {
   refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); if (profile) render(); });
   if (liveTimer) return;
   liveTimer = setInterval(async () => {
-    await refreshGameLists();
-    await persistNewlySettledPicks();
-    await persistNewlySettledWeeklyBets();
-    if (profile) render();
+    if (pendingSaveCount > 0) return; // don't rebuild the screen while a bet is mid-save
+    const dataChanged = await refreshGameLists();
+    const settledA = await persistNewlySettledPicks();
+    const settledB = await persistNewlySettledWeeklyBets();
+    if (profile && (dataChanged || settledA || settledB)) render();
   }, 60000);
 }
 
@@ -596,6 +599,7 @@ async function persistNewlySettledWeeklyBets() {
     if (r.status !== 'pending') { p.settledResult = r; changed = true; }
   });
   if (changed) { try { await savePicks(allPicks); } catch (e) { /* retry next cycle */ } }
+  return changed;
 }
 function weeklyNetUnits(name, wk) {
   return weeklyBetsFor(name, wk).reduce((s,p) => {
@@ -1080,6 +1084,7 @@ async function persistNewlySettledPicks() {
   if (changed) {
     try { await savePicks(allPicks); } catch (e) { /* best-effort; will retry next cycle */ }
   }
+  return changed;
 }
 function potentialWin(p) { return p.units; }
 
