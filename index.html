@@ -264,6 +264,8 @@ let trackerWizardOpen = false;
 let trackerDateFilter = 'all'; // 'week' | 'month' | 'year' | 'all' | a specific 'YYYY-MM-DD'
 let trackerLeagueFilter = null; // sport id or null
 let trackerTeamFilter = null; // team abbr or null
+let trackerBetTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'moneyline' | 'parlay'
+let trackerWizardLegs = []; // legs accumulated for an in-progress parlay, persists across wizard re-renders
 let trackerWizard = {}; // in-progress wizard state, reset each time the wizard opens
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
 let weeklySelectedUnits = {}; // gameId+betType -> chosen flame tier in units (10/20/30), unsaved until locked
@@ -1060,15 +1062,35 @@ function renderTrackerWizard() {
   const card = el('div', 'event-card');
   card.style.padding = '16px';
   card.style.overflowX = 'hidden';
-  card.appendChild(el('div', null, '📝 Log a bet')).style.cssText = 'font-size:14px;font-weight:700;margin-bottom:12px;';
+  const titleTxt = trackerWizardLegs.length ? `📝 Log a bet — leg ${trackerWizardLegs.length + 1}` : '📝 Log a bet';
+  card.appendChild(el('div', null, titleTxt)).style.cssText = 'font-size:14px;font-weight:700;margin-bottom:12px;';
 
-  const dateRow = el('div'); dateRow.style.cssText = 'margin-bottom:10px;overflow:hidden;width:100%;';
+  if (trackerWizardLegs.length) {
+    const legsCard = el('div');
+    legsCard.style.cssText = 'background:var(--surface-2);border-radius:8px;padding:10px;margin-bottom:12px;';
+    legsCard.appendChild(el('div', null, `Parlay so far (${trackerWizardLegs.length} leg${trackerWizardLegs.length === 1 ? '' : 's'})`)).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:6px;';
+    trackerWizardLegs.forEach((leg, i) => {
+      const row = el('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-dim);padding:4px 0;';
+      row.innerHTML = `<span>${leg.matchup} — ${leg.selection}</span>`;
+      const rmBtn = el('button', null, '✕');
+      rmBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:22px;height:22px;font-size:10px;flex-shrink:0;';
+      rmBtn.onclick = () => { trackerWizardLegs.splice(i,1); render(); };
+      row.appendChild(rmBtn);
+      legsCard.appendChild(row);
+    });
+    card.appendChild(legsCard);
+  }
+
+  const dateRow = el('div'); dateRow.style.cssText = 'margin-bottom:10px;';
   dateRow.appendChild(el('label', null, 'Date')).style.cssText = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;';
+  const dateInputWrap = el('div'); dateInputWrap.style.cssText = 'display:flex;width:100%;';
   const dateInput = el('input'); dateInput.type = 'date';
   dateInput.max = new Date().toISOString().slice(0,10);
   dateInput.value = new Date().toISOString().slice(0,10);
-  dateInput.style.cssText = 'width:100%;max-width:100%;box-sizing:border-box;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
-  dateRow.appendChild(dateInput);
+  dateInput.style.cssText = 'flex:1;min-width:0;width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:14px;';
+  dateInputWrap.appendChild(dateInput);
+  dateRow.appendChild(dateInputWrap);
   card.appendChild(dateRow);
 
   const leagueRow = el('div'); leagueRow.style.cssText = 'margin-bottom:10px;';
@@ -1185,35 +1207,69 @@ function renderTrackerWizard() {
   const errEl = el('div', 'pick-error');
   card.appendChild(errEl);
 
-  const addBtn = el('button', 'lock-btn', 'Add this bet');
-  addBtn.style.marginTop = '10px';
-  addBtn.onclick = () => {
-    errEl.textContent = '';
+  function buildCurrentLeg() {
     const matchupText = matchupSel.value ? matchupSel.options[matchupSel.selectedIndex].textContent : manualMatchupInput.value;
-    if (!matchupText) { errEl.textContent = 'Pick or enter a matchup first.'; return; }
-    if (betTypeSel.value !== 'moneyline' && !lineInput.value) { errEl.textContent = 'Enter the line.'; return; }
-    if (!costInput.value) { errEl.textContent = 'Enter the amount bet.'; return; }
-
+    if (!matchupText) { errEl.textContent = 'Pick or enter a matchup first.'; return null; }
+    if (betTypeSel.value !== 'moneyline' && !lineInput.value) { errEl.textContent = 'Enter the line.'; return null; }
     const g = gamesForDate.find(x => x.id === matchupSel.value);
     const sideLabelText = sideSel.options[sideSel.selectedIndex] ? sideSel.options[sideSel.selectedIndex].textContent : sideSel.value;
     let selectionText;
     if (betTypeSel.value === 'total') selectionText = (sideSel.value === 'OVER' ? 'Over' : 'Under') + ' ' + lineInput.value;
     else if (betTypeSel.value === 'moneyline') selectionText = sideLabelText + ' ML';
     else selectionText = sideLabelText + ' ' + (parseFloat(lineInput.value) > 0 ? '+' + lineInput.value : lineInput.value);
-
-    if (!kalshiPendingExtraction) kalshiPendingExtraction = [];
-    kalshiPendingExtraction.push({
-      _tempId: 'temp_' + Date.now(),
+    errEl.textContent = '';
+    return {
       matchup: matchupText, selection: selectionText,
+      placedAt: dateInput.value || null,
+      matchedSport: leagueSel.value || null, matchedGameId: g ? g.id : null,
+      homeAbbr: g ? g.home : null, awayAbbr: g ? g.away : null,
+      betSide: (betTypeSel.value === 'total') ? null : (g ? sideSel.value : null),
+      betType: betTypeSel.value
+    };
+  }
+
+  const addLegBtn = el('button', null, '+ Add parlay leg');
+  addLegBtn.style.cssText = 'width:100%;margin-top:10px;background:none;border:1px solid var(--accent);color:var(--accent);font-size:13px;font-weight:700;padding:9px;border-radius:6px;';
+  addLegBtn.onclick = () => {
+    const leg = buildCurrentLeg();
+    if (!leg) return;
+    trackerWizardLegs.push(leg);
+    render();
+  };
+  card.appendChild(addLegBtn);
+
+  const addBtn = el('button', 'lock-btn', trackerWizardLegs.length ? `Finish parlay (${trackerWizardLegs.length + 1} legs)` : 'Add this bet');
+  addBtn.style.marginTop = '8px';
+  addBtn.onclick = () => {
+    const leg = buildCurrentLeg();
+    if (!leg) return;
+    if (!costInput.value) { errEl.textContent = 'Enter the amount bet.'; return; }
+
+    const allLegs = [...trackerWizardLegs, leg];
+    const shared = {
       cost: parseFloat(costInput.value) || 0,
       payout: payoutInput.value === '' ? null : parseFloat(payoutInput.value),
       maxPayout: null,
       status: payoutInput.value === '' ? 'open' : 'settled',
-      placedAt: dateInput.value || null,
-      matchedSport: leagueSel.value || null, matchedGameId: g ? g.id : null,
-      homeAbbr: g ? g.home : null, awayAbbr: g ? g.away : null,
-      betSide: (betTypeSel.value === 'total') ? null : (g ? sideSel.value : null)
-    });
+      placedAt: leg.placedAt
+    };
+
+    if (!kalshiPendingExtraction) kalshiPendingExtraction = [];
+    if (allLegs.length === 1) {
+      kalshiPendingExtraction.push({ _tempId: 'temp_' + Date.now(), ...leg, ...shared });
+    } else {
+      const sports = [...new Set(allLegs.map(l => l.matchedSport).filter(Boolean))];
+      kalshiPendingExtraction.push({
+        _tempId: 'temp_' + Date.now(),
+        betType: 'parlay', legs: allLegs,
+        matchup: allLegs.length + '-leg parlay',
+        selection: allLegs.map(l => l.selection).join(' + '),
+        matchedSport: sports.length === 1 ? sports[0] : null,
+        matchedGameId: null, homeAbbr: null, awayAbbr: null, betSide: null,
+        ...shared
+      });
+    }
+    trackerWizardLegs = [];
     trackerWizardOpen = false;
     render();
   };
@@ -1221,7 +1277,7 @@ function renderTrackerWizard() {
 
   const cancelBtn = el('button', null, 'Cancel');
   cancelBtn.style.cssText = 'margin-top:8px;width:100%;background:none;border:1px solid var(--border);color:var(--text-faint);font-size:12px;padding:8px;border-radius:6px;';
-  cancelBtn.onclick = () => { trackerWizardOpen = false; render(); };
+  cancelBtn.onclick = () => { trackerWizardOpen = false; trackerWizardLegs = []; render(); };
   card.appendChild(cancelBtn);
 
   return card;
@@ -1238,13 +1294,22 @@ function renderKalshiSection() {
 
   const addBtn = el('button', 'lock-btn', '+ Add a bet');
   addBtn.style.marginBottom = '4px';
-  addBtn.onclick = () => { trackerWizardOpen = true; render(); };
+  addBtn.onclick = () => { trackerWizardOpen = true; trackerWizardLegs = []; render(); };
   wrap.appendChild(addBtn);
 
   if (kalshiPendingExtraction && kalshiPendingExtraction.length) {
     wrap.appendChild(el('div', 'week-header', `New bet${kalshiPendingExtraction.length === 1 ? '' : 's'} — fill in and save`));
     kalshiPendingExtraction.forEach(bet => {
       const card = el('div', 'event-card');
+
+      if (bet.legs && bet.legs.length) {
+        const legsBox = el('div');
+        legsBox.style.cssText = 'background:var(--surface-2);border-radius:6px;padding:8px;margin-bottom:8px;';
+        bet.legs.forEach(leg => {
+          legsBox.appendChild(el('div', null, `${leg.matchup} — ${leg.selection}`)).style.cssText = 'font-size:11.5px;color:var(--text-dim);padding:2px 0;';
+        });
+        card.appendChild(legsBox);
+      }
 
       const matchupInput = el('input'); matchupInput.value = bet.matchup; matchupInput.placeholder = 'Matchup (e.g. WAS Commanders @ PHI Eagles)';
       matchupInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin-bottom:6px;';
@@ -1300,7 +1365,8 @@ function renderKalshiSection() {
         cost: bet.cost, payout: bet.payout, maxPayout: bet.maxPayout, status: bet.status,
         placedAt: bet.placedAt, matchedSport: bet.matchedSport, matchedGameId: bet.matchedGameId,
         homeAbbr: bet.homeAbbr || null, awayAbbr: bet.awayAbbr || null,
-        betSide: bet.betSide || null,
+        betSide: bet.betSide || null, betType: bet.betType || null,
+        legs: bet.legs || null,
         timestamp: new Date().toISOString()
       }));
       newRecords.forEach(r => allPicks.push(r));
@@ -1353,6 +1419,15 @@ function renderKalshiSection() {
       wrap.appendChild(leagueScroller);
     }
 
+    // bet type filter chips
+    const typeScroller = el('div', 'league-scroller');
+    [['all','All'], ['spread','Spread'], ['total','Total'], ['moneyline','Moneyline'], ['parlay','Parlay']].forEach(([mode,label]) => {
+      const pill = el('button', 'league-pill' + (trackerBetTypeFilter === mode ? ' active' : ''), label);
+      pill.onclick = () => { trackerBetTypeFilter = mode; render(); };
+      typeScroller.appendChild(pill);
+    });
+    wrap.appendChild(typeScroller);
+
     // team filter dropdown — only teams you actually bet on within the selected league
     if (trackerLeagueFilter) {
       const teamsPresent = [...new Set(
@@ -1374,6 +1449,7 @@ function renderKalshiSection() {
     if (!inTrackerDateRange(e.date, trackerDateFilter)) return false;
     if (trackerLeagueFilter && e.p.matchedSport !== trackerLeagueFilter) return false;
     if (trackerTeamFilter && e.p.betSide !== trackerTeamFilter) return false;
+    if (trackerBetTypeFilter !== 'all' && e.p.betType !== trackerBetTypeFilter) return false;
     return true;
   });
   const settledEntries = history.filter(e => e.profit !== null);
