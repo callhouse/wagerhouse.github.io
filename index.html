@@ -1210,7 +1210,7 @@ function renderTrackerWizard() {
       maxPayout: null,
       status: payoutInput.value === '' ? 'open' : 'settled',
       placedAt: dateInput.value || null,
-      matchedSport: g ? leagueSel.value : null, matchedGameId: g ? g.id : null,
+      matchedSport: leagueSel.value || null, matchedGameId: g ? g.id : null,
       homeAbbr: g ? g.home : null, awayAbbr: g ? g.away : null
     });
     trackerWizardOpen = false;
