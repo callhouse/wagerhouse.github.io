@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CallHouse</title>
+<title>Wager House</title>
 <style>
   :root {
-    --bg: #0A0C0D; --surface: #15181A; --surface-2: #1E2224; --border: #2A2F31;
-    --text: #F2F4F4; --text-dim: #8D9598; --text-faint: #5A6164;
-    --accent: #53E05B; --accent-dark: #0F2E12; --accent-text: #06210A;
-    --danger: #FF5C5C; --danger-dark: #3A1414;
-    --gold: #F2C94C;
+    --bg: #0B0B0B; --surface: #171514; --surface-2: #201C1A; --border: #332D29;
+    --text: #F6EBD7; --text-dim: #B8A99A; --text-faint: #7A6D62;
+    --accent: #FF7A3D; --accent-dark: #3D2011; --accent-text: #1F0E05;
+    --danger: #EF3B3B; --danger-dark: #3A1414;
+    --gold: #FFC629;
     --font-head: 'Helvetica Neue', -apple-system, sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
   }
@@ -21,8 +21,9 @@
 
   header.top { position: sticky; top: 0; z-index: 20; background: var(--bg); padding: 16px 16px 0; border-bottom: 1px solid var(--border); }
   header.top .row1 { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
-  header.top h1 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: -0.01em; text-transform: uppercase; }
-  header.top h1 span { color: var(--accent); }
+  header.top h1 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: -0.01em; text-transform: uppercase; color: var(--text); }
+  header.top h1 span { background: linear-gradient(135deg, #FFC629, #EF3B3B); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand { display: flex; align-items: center; gap: 8px; }
   header.top .who { font-size: 12px; color: var(--text-dim); }
 
   .tabbar { display: flex; gap: 4px; }
@@ -129,7 +130,17 @@
 <div id="app">
   <header class="top">
     <div class="row1">
-      <h1>Call<span>House</span></h1>
+      <div class="brand">
+        <svg width="26" height="32" viewBox="0 0 48 60" aria-hidden="true">
+          <defs><linearGradient id="whGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#FFC629"/>
+            <stop offset="100%" stop-color="#EF3B3B"/>
+          </linearGradient></defs>
+          <polyline points="8,14 16,40 24,22 32,40 40,14" fill="none" stroke="url(#whGrad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="19" y="44" width="10" height="14" rx="2" fill="#FFC629"/>
+        </svg>
+        <h1>Wager<span>House</span></h1>
+      </div>
       <span class="who" id="whoLabel"></span>
     </div>
     <div class="tabbar" id="sectionSwitch"></div>
