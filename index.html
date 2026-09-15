@@ -3395,7 +3395,7 @@ function renderGameCard(g, sport, meta) {
 
     function rebuildGrid() {
       grid.innerHTML = '';
-      computeOptions(magnitude).forEach(opt => {
+      computeOptions(magnitude, flipFavorite).forEach(opt => {
         const btn = el('div', 'outcome-btn' + (selectedSide[key] === opt.side ? ' selected' : ''));
         btn.innerHTML = `<div class="oc-team">${opt.team}</div><div class="oc-line">${opt.label}</div>`;
         btn.onclick = () => {
@@ -3409,16 +3409,30 @@ function renderGameCard(g, sport, meta) {
     }
 
     const adjustRow = el('div');
-    adjustRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:6px;';
-    const adjustBtn = el('button', null, `\u270f\ufe0f Adjust`);
+    adjustRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;';
+    const adjustBtn = el('button', null, `\u270f\ufe0f Adjust Line/Payout`);
     adjustBtn.style.cssText = 'background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;';
     const adjustPanel = el('div');
-    adjustPanel.style.cssText = 'display:none;gap:8px;align-items:center;flex:1;min-width:0;';
+    adjustPanel.style.cssText = 'display:none;gap:6px;align-items:center;flex:1;min-width:0;flex-wrap:wrap;';
     const adjustInput = el('input'); adjustInput.type = 'number'; adjustInput.step = '0.5'; adjustInput.value = magnitude !== null ? magnitude : '';
-    adjustInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;';
+    adjustInput.style.cssText = 'flex:0 0 auto;width:60px;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;';
+    let flipFavorite = false;
+    let flipBtn = null;
+    if (betType === 'spread') {
+      flipBtn = el('button', null, 'Flip the favorite');
+      flipBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;flex-shrink:0;';
+      flipBtn.onclick = () => {
+        flipFavorite = !flipFavorite;
+        flipBtn.style.borderColor = flipFavorite ? 'var(--accent)' : 'var(--border)';
+        flipBtn.style.color = flipFavorite ? 'var(--accent)' : 'var(--text-dim)';
+        rebuildGrid();
+      };
+    }
     const applyBtn = el('button', null, 'Apply');
     applyBtn.style.cssText = 'background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;flex-shrink:0;';
-    adjustPanel.appendChild(adjustInput); adjustPanel.appendChild(applyBtn);
+    adjustPanel.appendChild(adjustInput);
+    if (flipBtn) adjustPanel.appendChild(flipBtn);
+    adjustPanel.appendChild(applyBtn);
     let oddsMultiplier = 1;
     const oddsWrap = el('div');
     oddsWrap.style.cssText = 'margin-top:8px;display:none;';
@@ -3496,7 +3510,8 @@ function renderGameCard(g, sport, meta) {
         line = null;
         spreadLabel = null; // moneyline — settlement falls back to straight winner comparison
       } else {
-        const isFav = displaySide === favSide;
+        const effectiveFavSide = flipFavorite ? (favSide === g.home ? g.away : g.home) : favSide;
+        const isFav = displaySide === effectiveFavSide;
         spreadLabel = magnitude === 0 ? 'PK' : (isFav ? '-' + magnitude : '+' + magnitude);
         line = magnitude === 0 ? 0 : (isFav ? -magnitude : magnitude);
       }
@@ -3664,10 +3679,11 @@ function renderGameCard(g, sport, meta) {
 
   const sel = challengeTypeSelection[g.id];
   if (sel === 'spread') {
-    card.appendChild(renderPoolMarket('spread', hasSpread, (spread !== null) ? Math.abs(spread) : null, (magnitude) => {
+    card.appendChild(renderPoolMarket('spread', hasSpread, (spread !== null) ? Math.abs(spread) : null, (magnitude, flip) => {
+      const effectiveFavSide = flip ? (favSide === g.home ? g.away : g.home) : favSide;
       const favLabel = magnitude === 0 ? 'PK' : '-' + magnitude;
       const udLabel = magnitude === 0 ? 'PK' : '+' + magnitude;
-      return [g.away, g.home].map(ab => ({ side: ab, team: ab, label: ab === favSide ? favLabel : udLabel }));
+      return [g.away, g.home].map(ab => ({ side: ab, team: ab, label: ab === effectiveFavSide ? favLabel : udLabel }));
     }));
   } else if (sel === 'moneyline') {
     card.appendChild(renderPoolMarket('moneyline', hasMoneyline, null, () => {
