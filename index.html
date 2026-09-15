@@ -1647,6 +1647,12 @@ function challengeStatusText(ch) {
   return ch.status;
 }
 
+function gameTimeLabel(gameId) {
+  const idx = gameIndex[gameId];
+  if (!idx || !idx.game || !idx.game.start) return null;
+  return new Date(idx.game.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function renderChallengeRow(ch) {
   const card = el('div', 'event-card');
   if (ch.status === 'accepted') card.style.borderColor = '#4CAF50';
@@ -1655,7 +1661,9 @@ function renderChallengeRow(ch) {
   top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
   top.innerHTML = `<span style="font-size:11px;color:var(--text-faint);">${ch.visibility === 'public' ? '\ud83d\udce2 Global' : '\ud83d\udc64 Friend'}</span><span style="font-size:11px;color:var(--text-faint);">${new Date(ch.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`;
   card.appendChild(top);
-  card.appendChild(el('div', null, ch.gameLabel)).style.cssText = 'font-size:13.5px;font-weight:700;margin-bottom:4px;';
+  card.appendChild(el('div', null, ch.gameLabel)).style.cssText = 'font-size:13.5px;font-weight:700;margin-bottom:2px;';
+  const gTime = gameTimeLabel(ch.gameId);
+  if (gTime) card.appendChild(el('div', null, gTime)).style.cssText = 'font-size:11px;color:var(--text-faint);margin-bottom:6px;';
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
   card.appendChild(el('div', null, `${ch.creator}'s pick: ${marketTxt} · ${ch.units}u`)).style.cssText = 'font-size:12.5px;color:var(--text-dim);margin-bottom:8px;';
@@ -1792,9 +1800,11 @@ function renderSwipeCard(ch) {
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
   const leagueLabel = (LEAGUES_META.find(l => l.id === ch.sport) || {}).label || (ch.sport || 'sport').toUpperCase();
+  const gTime = gameTimeLabel(ch.gameId);
   card.innerHTML = `
     <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:10px;">${leagueLabel} · from ${ch.creator}</div>
-    <div style="font-size:16px;font-weight:800;margin-bottom:14px;">${ch.gameLabel}</div>
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px;">${ch.gameLabel}</div>
+    ${gTime ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">${gTime}</div>` : '<div style="margin-bottom:12px;"></div>'}
     <div style="font-size:24px;font-weight:800;color:var(--accent);margin-bottom:8px;">${marketTxt}</div>
     <div style="font-size:14px;color:var(--text-dim);">${chipsFor(ch.units)} ${ch.units}u to win ${ch.units}u</div>
   `;
@@ -1877,6 +1887,8 @@ function renderSwipeCart() {
     const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
     const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
     left.appendChild(el('div', 'who', ch.gameLabel));
+    const gTime = gameTimeLabel(ch.gameId);
+    if (gTime) left.appendChild(el('div', 'detail', gTime));
     left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u`));
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
