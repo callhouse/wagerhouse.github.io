@@ -618,7 +618,7 @@ async function fetchAllProfiles(forceRefresh) {
     const list = (json.documents || []).map(doc => {
       const uid = doc.name.split('/').pop();
       const fields = fromFsFields(doc.fields);
-      return { uid, name: fields.name, username: fields.username, venmo: fields.venmo, email: fields.email || null, authEmail: fields.authEmail || null };
+      return { uid, name: fields.name, username: fields.username, email: fields.email || null, authEmail: fields.authEmail || null };
     }).filter(p => p.name && p.username);
     allProfilesCache = list;
     return list;
@@ -869,10 +869,6 @@ function renderProfileScreen() {
   card.appendChild(userDisplay);
   card.appendChild(el('div', 'setup-hint', "Username can't be changed once your account is created."));
 
-  card.appendChild(el('label', null, 'Venmo name'));
-  const venmoInput = el('input'); venmoInput.value = profile.venmo || ''; venmoInput.placeholder = 'e.g. @jordan-smith';
-  card.appendChild(venmoInput);
-
   card.appendChild(el('label', null, 'Email (for password recovery)'));
   const emailInput = el('input'); emailInput.type = 'email'; emailInput.value = profile.email || ''; emailInput.placeholder = 'e.g. jordan@email.com';
   card.appendChild(emailInput);
@@ -896,12 +892,11 @@ function renderProfileScreen() {
     if (!name) { saveErr.textContent = 'Name cannot be empty.'; return; }
     saveErr.textContent = '';
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
-    const venmo = venmoInput.value.trim() || null;
     const email = emailInput.value.trim() || null;
     const unitSize = unitSizeInput.value ? parseFloat(unitSizeInput.value) : null;
     const oldName = profile.name;
     try {
-      const updates = { name, venmo, unitSize, email };
+      const updates = { name, unitSize, email };
       if (email && email !== profile.email) {
         try {
           await ensureFreshSession();
@@ -1179,7 +1174,7 @@ function renderFriendsScreen() {
       if (friendProfileView === f.uid) {
         const full = (allProfilesCache || []).find(p => p.uid === f.uid) || f;
         const detail = el('div', 'locked-note');
-        detail.innerHTML = `<div class="ln-title">${full.name}</div>@${full.username}${full.venmo ? `<div style="margin-top:4px;">Venmo: ${full.venmo}</div>` : ''}`;
+        detail.innerHTML = `<div class="ln-title">${full.name}</div>@${full.username}`;
         wrap.appendChild(detail);
       }
     });
@@ -1193,7 +1188,7 @@ function renderSetup() {
   const card = el('div', 'setup-card');
   card.appendChild(el('div', null, authMode === 'login' ? 'Log in' : 'Create account')).style.cssText = 'font-size:16px;font-weight:800;margin-bottom:4px;';
 
-  let nameInput, venmoInput, emailInput;
+  let nameInput, emailInput;
   if (authMode === 'signup') {
     card.appendChild(el('label', null, 'Your name'));
     nameInput = el('input'); nameInput.placeholder = 'e.g. Jordan';
@@ -1208,9 +1203,6 @@ function renderSetup() {
     card.appendChild(el('label', null, 'Email (for password recovery)'));
     emailInput = el('input'); emailInput.type = 'email'; emailInput.placeholder = 'e.g. jordan@email.com'; emailInput.autocomplete = 'email';
     card.appendChild(emailInput);
-    card.appendChild(el('label', null, 'Venmo name (optional)'));
-    venmoInput = el('input'); venmoInput.placeholder = 'e.g. @jordan-smith';
-    card.appendChild(venmoInput);
   }
 
   card.appendChild(el('label', null, 'Password'));
@@ -1236,7 +1228,6 @@ function renderSetup() {
     card.appendChild(forgotLink);
   }
 
-  card.appendChild(el('div', 'setup-hint', 'Everyone using this app shares one global leaderboard.'));
   wrap.appendChild(card);
 
   goBtn.onclick = async () => {
@@ -1261,15 +1252,14 @@ function renderSetup() {
             saveSession({ idToken: updated.idToken, refreshToken: updated.refreshToken, uid: auth.localId, expiresAt: Date.now() + parseInt(updated.expiresIn, 10) * 1000 });
           } catch (e) { /* real email update failed (e.g. already in use elsewhere) — keep the synthetic one, account still works */ }
         }
-        const venmo = venmoInput.value.trim() || null;
-        await saveProfileDoc(auth.localId, { name, username, venmo, email, authEmail });
-        saveProfile({ name, username, venmo, email, uid: auth.localId });
+        await saveProfileDoc(auth.localId, { name, username, email, authEmail });
+        saveProfile({ name, username, email, uid: auth.localId });
       } else {
         const auth = await authSignIn(username, password);
         saveSession({ idToken: auth.idToken, refreshToken: auth.refreshToken, uid: auth.localId, expiresAt: Date.now() + parseInt(auth.expiresIn, 10) * 1000 });
         const doc = await fetchProfileDoc(auth.localId);
         if (!doc) throw new Error('Profile data missing for this account.');
-        saveProfile({ name: doc.name, username: doc.username, venmo: doc.venmo, email: doc.email || null, unitSize: doc.unitSize || null, friends: doc.friends || [], uid: auth.localId });
+        saveProfile({ name: doc.name, username: doc.username, email: doc.email || null, unitSize: doc.unitSize || null, friends: doc.friends || [], uid: auth.localId });
       }
       await completeLoginSetup();
     } catch (e) {
