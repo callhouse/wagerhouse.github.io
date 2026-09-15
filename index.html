@@ -352,6 +352,7 @@ let openChallengeDateFilter = 'week'; // 'today' | 'tomorrow' | 'week'
 let openChallengeTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'player' | 'golf'
 let openChallengeMinUnits = null; // null = no floor
 let unitFilterDebounce = null;
+let counterFormOpen = {};
 let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
@@ -2700,11 +2701,15 @@ function renderChallengeRow(ch) {
       const row = el('div'); row.style.cssText = 'display:flex;gap:8px;';
       const acceptBtn = el('button', 'lock-btn', 'Accept'); acceptBtn.style.flex = '1';
       acceptBtn.onclick = () => acceptChallenge(ch);
+      const counterBtn = el('button', null, 'Counter');
+      counterBtn.style.cssText = 'background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:9px 14px;font-size:13px;font-weight:700;';
+      counterBtn.onclick = () => { counterFormOpen[ch.id] = !counterFormOpen[ch.id]; render(); };
       const declineBtn = el('button', null, 'Decline');
       declineBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;padding:9px 14px;font-size:13px;';
       declineBtn.onclick = () => declineChallenge(ch);
-      row.appendChild(acceptBtn); row.appendChild(declineBtn);
+      row.appendChild(acceptBtn); row.appendChild(counterBtn); row.appendChild(declineBtn);
       card.appendChild(row);
+      if (counterFormOpen[ch.id]) card.appendChild(renderCounterForm(ch));
     } else if (ch.visibility === 'public') {
       const acceptBtn = el('button', 'lock-btn', 'Accept challenge');
       acceptBtn.onclick = () => acceptChallenge(ch);
@@ -2714,6 +2719,8 @@ function renderChallengeRow(ch) {
     }
   } else if (ch.status === 'declined') {
     card.appendChild(el('div', 'no-odds-note', `${ch.targetFriend} declined this challenge`));
+  } else if (ch.status === 'countered') {
+    card.appendChild(el('div', 'no-odds-note', isMine ? `You sent a counter offer to ${ch.targetFriend} \u2014 waiting on their response` : `Waiting on a response \u2014 you sent a counter offer`));
   } else if (ch.status === 'accepted') {
     const myOutcome = myChallengeOutcome(ch) || 'pending';
     let txt, color;
@@ -2745,6 +2752,107 @@ function renderChallengeRow(ch) {
   }
   return card;
 }
+function renderCounterForm(ch) {
+  const wrap = el('div');
+  wrap.style.cssText = 'margin-top:8px;background:var(--surface-2);border-radius:8px;padding:10px;';
+  wrap.appendChild(el('div', null, 'Counter offer')).style.cssText = 'font-size:12px;font-weight:800;margin-bottom:8px;color:var(--text-dim);';
+
+  const hasNumericLine = (ch.betType === 'spread' && ch.spreadLabel) || ch.betType === 'total' || ch.propType === 'player';
+  const wasFav = ch.betType === 'spread' && ch.line < 0;
+  let lineInput = null;
+  if (hasNumericLine) {
+    wrap.appendChild(el('label', null, ch.betType === 'total' ? 'Total' : (ch.propType === 'player' ? 'Line' : 'Spread (magnitude)')));
+    lineInput = el('input'); lineInput.type = 'number'; lineInput.step = '0.5'; lineInput.value = Math.abs(ch.line);
+    lineInput.style.cssText = 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 8px;font-size:13px;box-sizing:border-box;';
+    wrap.appendChild(lineInput);
+  }
+
+  const hasOdds = ch.betType !== 'total';
+  let oddsMultiplier = ch.oddsMultiplier || 1;
+  if (hasOdds) {
+    wrap.appendChild(el('div', null, 'Payout odds')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin:8px 0 6px;';
+    const oddsRow = el('div'); oddsRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+    [['3','3:1'],['2','2:1'],['1','Even (1:1)'],['0.5','1:2'],['0.333333333','1:3']].forEach(([val,label]) => {
+      const btn = el('button', null, label);
+      const isCurrent = Math.abs(parseFloat(val) - oddsMultiplier) < 0.01;
+      btn.style.cssText = `background:none;border:1px solid ${isCurrent ? 'var(--accent)' : 'var(--border)'};color:${isCurrent ? 'var(--accent)' : 'var(--text-dim)'};border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;`;
+      btn.onclick = () => {
+        oddsMultiplier = parseFloat(val);
+        oddsRow.querySelectorAll('button').forEach(b => { b.style.borderColor = 'var(--border)'; b.style.color = 'var(--text-dim)'; });
+        btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)';
+      };
+      oddsRow.appendChild(btn);
+    });
+    wrap.appendChild(oddsRow);
+  }
+
+  wrap.appendChild(el('label', null, 'Units')).style.marginTop = '8px';
+  const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = ch.units;
+  unitsInput.style.cssText = 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 8px;font-size:13px;box-sizing:border-box;';
+  wrap.appendChild(unitsInput);
+
+  const errEl = el('div', 'pick-error');
+  const btnRow = el('div'); btnRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
+  const sendBtn = el('button', 'lock-btn', 'Send counter'); sendBtn.style.flex = '1'; sendBtn.style.marginTop = '0';
+  const cancelBtn = el('button', null, 'Cancel');
+  cancelBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;padding:9px 14px;font-size:13px;';
+  cancelBtn.onclick = () => { counterFormOpen[ch.id] = false; render(); };
+  btnRow.appendChild(sendBtn); btnRow.appendChild(cancelBtn);
+  wrap.appendChild(btnRow);
+  wrap.appendChild(errEl);
+
+  sendBtn.onclick = async () => {
+    if (!requireUnitSize('counter a challenge')) return;
+    const units = parseFloat(unitsInput.value);
+    errEl.textContent = '';
+    if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
+    let line = ch.line, spreadLabel = ch.spreadLabel;
+    if (hasNumericLine) {
+      const magnitude = parseFloat(lineInput.value);
+      if (isNaN(magnitude) || magnitude < 0) { errEl.textContent = 'Enter a valid line.'; return; }
+      if (ch.betType === 'spread') {
+        spreadLabel = magnitude === 0 ? 'PK' : (wasFav ? '-' + magnitude : '+' + magnitude);
+        line = magnitude === 0 ? 0 : (wasFav ? -magnitude : magnitude);
+      } else {
+        line = magnitude;
+      }
+    }
+    sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+    const counter = {
+      ...ch,
+      id: profile.name + '_counter_' + ch.id + '_' + Date.now(),
+      creator: profile.name, targetFriend: ch.creator, visibility: 'friend',
+      units, line, spreadLabel, oddsMultiplier: hasOdds ? oddsMultiplier : 1,
+      creatorUnitSize: profile.unitSize || null,
+      status: 'open', acceptedBy: null,
+      counterOf: ch.id,
+      timestamp: new Date().toISOString()
+    };
+    delete counter.acceptorUnits;
+    delete counter.settledResult;
+    delete counter.creatorAcctAdjusted;
+    delete counter.acceptorAcctAdjusted;
+    delete counter.playerNotFound;
+    delete counter.finalScores;
+    delete counter.actualStatValue;
+    const idx = allPicks.findIndex(p => p.id === ch.id);
+    const prevStatus = idx > -1 ? allPicks[idx].status : null;
+    if (idx > -1) allPicks[idx].status = 'countered';
+    allPicks.push(counter);
+    try {
+      await savePicks(allPicks);
+      counterFormOpen[ch.id] = false;
+      render();
+    } catch (e) {
+      if (idx > -1) allPicks[idx].status = prevStatus;
+      allPicks.pop();
+      errEl.textContent = "Couldn't send (" + describeFetchError(e) + ") — try again.";
+      sendBtn.disabled = false; sendBtn.textContent = 'Send counter';
+    }
+  };
+  return wrap;
+}
+
 async function deleteChallenge(ch) {
   if (ch.status !== 'open') return; // can only withdraw a challenge before someone accepts it
   if (!confirm('Delete this challenge permanently?')) return;
@@ -3079,11 +3187,15 @@ function renderExistingChallenges() {
 
   const all = allPicks.filter(p => p.poolType === 'challenge');
   const stillActive = ch => ch.status === 'open';
+  const friendNames = new Set((profile.friends || []).map(f => f.name));
   let byView;
   if (existingChallengeView === 'global') {
     byView = all.filter(ch => ch.visibility === 'public' && stillActive(ch));
   } else if (existingChallengeView === 'friends') {
-    byView = all.filter(ch => ch.visibility === 'friend' && (ch.creator === profile.name || ch.targetFriend === profile.name) && stillActive(ch));
+    byView = all.filter(ch => stillActive(ch) && (
+      (ch.visibility === 'public' && friendNames.has(ch.creator)) ||
+      (ch.visibility === 'friend' && (ch.creator === profile.name || ch.targetFriend === profile.name))
+    ));
   } else {
     byView = all.filter(ch => ch.creator === profile.name && stillActive(ch));
   }
@@ -3198,7 +3310,21 @@ function renderExistingChallenges() {
   wrap.appendChild(dateScroller);
   wrap.appendChild(typeScroller);
   wrap.appendChild(maxUnitsScroller);
-  const headerText = existingChallengeView === 'friends' ? 'Your friend challenges' : 'Bets you\'ve posted';
+
+  if (existingChallengeView === 'friends') {
+    const friendsGlobal = list.filter(ch => ch.visibility === 'public');
+    const friendsDirect = list.filter(ch => ch.visibility === 'friend');
+    wrap.appendChild(el('div', 'week-header', `Friends' Global Challenges (${friendsGlobal.length})`));
+    if (!friendsGlobal.length) { wrap.appendChild(el('div', 'empty', 'None of your friends have posted a public challenge right now.')); }
+    else { friendsGlobal.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+
+    wrap.appendChild(el('div', 'week-header', `Friends' Challenges to You (${friendsDirect.length})`));
+    if (!friendsDirect.length) { wrap.appendChild(el('div', 'empty', 'Nothing sent directly to you right now.')); }
+    else { friendsDirect.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+    return wrap;
+  }
+
+  const headerText = 'Bets you\'ve posted';
   wrap.appendChild(el('div', 'week-header', headerText));
   if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
   list.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
