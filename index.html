@@ -275,6 +275,9 @@ let trackerLeagueFilter = null; // sport id or null
 let trackerTeamFilter = null; // team abbr or null
 let trackerBetTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'moneyline' | 'parlay'
 let existingChallengeView = 'global'; // 'global' | 'friends'
+let challengeBrowseMode = 'list'; // 'list' | 'swipe' | 'cart'
+let swipeStack = [];
+let swipeCart = [];
 let trackerWizardLegs = []; // legs accumulated for an in-progress parlay, persists across wizard re-renders
 let trackerWizard = {}; // in-progress wizard state, reset each time the wizard opens
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
@@ -1667,6 +1670,41 @@ function renderChallengeRow(ch) {
   return card;
 }
 
+function generateHouseChallenges() {
+  const pool = [];
+  LEAGUES_META.filter(l => l.active).forEach(lg => {
+    (DATA[lg.id] || []).forEach(g => {
+      if (g.status !== 'scheduled') return;
+      const spreadVal = computeSpread(lg.id, g);
+      if (spreadVal !== null) {
+        const side = Math.random() < 0.5 ? g.home : g.away;
+        const line = side === g.home ? spreadVal : -spreadVal;
+        pool.push({ sport: lg.id, gameId: g.id, gameLabel: g.away + ' @ ' + g.home, betType: 'spread', side, line, spreadLabel: spreadLabelForSide(lg.id, g, side) });
+      }
+      const totalVal = g.overUnder;
+      if (totalVal !== null && totalVal !== undefined) {
+        const side = Math.random() < 0.5 ? 'OVER' : 'UNDER';
+        pool.push({ sport: lg.id, gameId: g.id, gameLabel: g.away + ' @ ' + g.home, betType: 'total', side, line: totalVal, spreadLabel: null });
+      }
+    });
+  });
+  const existingKeys = new Set(
+    allPicks.filter(p => p.poolType === 'challenge' && p.creator === 'House' && p.status === 'open')
+      .map(p => p.gameId + '_' + p.betType)
+  );
+  const fresh = pool.filter(o => !existingKeys.has(o.gameId + '_' + o.betType));
+  for (let i = fresh.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [fresh[i], fresh[j]] = [fresh[j], fresh[i]]; }
+  const chosen = fresh.slice(0, 100);
+  return chosen.map(o => ({
+    id: 'house_challenge_' + o.gameId + '_' + o.betType + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    poolType: 'challenge', creator: 'House',
+    sport: o.sport, gameId: o.gameId, gameLabel: o.gameLabel,
+    betType: o.betType, sideAbbr: o.side, units: 1 + Math.floor(Math.random() * 3), line: o.line, spreadLabel: o.spreadLabel,
+    visibility: 'public', targetFriend: null, status: 'open', acceptedBy: null,
+    timestamp: new Date().toISOString()
+  }));
+}
+
 async function acceptChallenge(ch) {
   const idx = allPicks.findIndex(p => p.id === ch.id);
   if (idx === -1) return;
@@ -1685,12 +1723,141 @@ async function declineChallenge(ch) {
   catch (e) { allPicks[idx] = prev; alert("Couldn't decline (" + describeFetchError(e) + ") — try again."); render(); }
 }
 
+function renderSwipeCard(ch) {
+  const cardWrap = el('div');
+  cardWrap.style.cssText = 'position:relative;touch-action:pan-y;user-select:none;margin-bottom:14px;';
+  const card = el('div', 'event-card');
+  card.style.cssText += 'padding:22px;cursor:grab;';
+  const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
+  const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+  const leagueLabel = (LEAGUES_META.find(l => l.id === ch.sport) || {}).label || (ch.sport || 'sport').toUpperCase();
+  card.innerHTML = `
+    <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:10px;">${leagueLabel} · from ${ch.creator}</div>
+    <div style="font-size:16px;font-weight:800;margin-bottom:14px;">${ch.gameLabel}</div>
+    <div style="font-size:24px;font-weight:800;color:var(--accent);margin-bottom:8px;">${marketTxt}</div>
+    <div style="font-size:14px;color:var(--text-dim);">${chipsFor(ch.units)} ${ch.units}u to win ${ch.units}u</div>
+  `;
+  const stampAccept = el('div', null, 'ACCEPT');
+  stampAccept.style.cssText = 'position:absolute;top:20px;left:20px;border:3px solid var(--accent);color:var(--accent);padding:4px 12px;font-weight:900;font-size:18px;border-radius:6px;transform:rotate(-15deg);opacity:0;pointer-events:none;';
+  const stampDecline = el('div', null, 'DECLINE');
+  stampDecline.style.cssText = 'position:absolute;top:20px;right:20px;border:3px solid var(--danger);color:var(--danger);padding:4px 12px;font-weight:900;font-size:18px;border-radius:6px;transform:rotate(15deg);opacity:0;pointer-events:none;';
+  card.appendChild(stampAccept); card.appendChild(stampDecline);
+  cardWrap.appendChild(card);
+
+  const btnRow = el('div'); btnRow.style.cssText = 'display:flex;gap:10px;';
+  const declineBtn = el('button', null, '\u2715 Decline');
+  declineBtn.style.cssText = 'flex:1;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:8px;padding:13px;font-weight:700;font-size:14px;';
+  const acceptBtn = el('button', null, '\u2713 Accept');
+  acceptBtn.style.cssText = 'flex:1;background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:13px;font-weight:700;font-size:14px;';
+  btnRow.appendChild(declineBtn); btnRow.appendChild(acceptBtn);
+  cardWrap.appendChild(btnRow);
+
+  function doAccept() { swipeCart.push(ch); swipeStack.shift(); render(); }
+  function doDecline() { swipeStack.shift(); render(); }
+  declineBtn.onclick = doDecline;
+  acceptBtn.onclick = doAccept;
+
+  let startX = 0, currentX = 0, dragging = false;
+  card.addEventListener('pointerdown', (e) => { dragging = true; startX = e.clientX; card.style.transition = 'none'; card.setPointerCapture(e.pointerId); });
+  card.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    currentX = e.clientX - startX;
+    card.style.transform = `translateX(${currentX}px) rotate(${currentX / 20}deg)`;
+    if (currentX > 20) { stampAccept.style.opacity = Math.min(1, currentX / 100); stampDecline.style.opacity = 0; }
+    else if (currentX < -20) { stampDecline.style.opacity = Math.min(1, -currentX / 100); stampAccept.style.opacity = 0; }
+    else { stampAccept.style.opacity = 0; stampDecline.style.opacity = 0; }
+  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    card.style.transition = 'transform 0.25s ease';
+    if (currentX > 100) { card.style.transform = `translateX(600px) rotate(30deg)`; setTimeout(doAccept, 150); }
+    else if (currentX < -100) { card.style.transform = `translateX(-600px) rotate(-30deg)`; setTimeout(doDecline, 150); }
+    else { card.style.transform = 'translateX(0) rotate(0)'; stampAccept.style.opacity = 0; stampDecline.style.opacity = 0; }
+    currentX = 0;
+  }
+  card.addEventListener('pointerup', endDrag);
+  card.addEventListener('pointercancel', endDrag);
+  return cardWrap;
+}
+
+function renderSwipeMode() {
+  const wrap = el('div');
+  const header = el('div');
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
+  header.appendChild(el('div', null, `${swipeStack.length} left to review`)).style.cssText = 'font-size:12px;color:var(--text-dim);';
+  const cartBtn = el('button', null, `Review cart (${swipeCart.length})`);
+  cartBtn.style.cssText = 'background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:7px 12px;font-size:12px;font-weight:700;';
+  cartBtn.onclick = () => { challengeBrowseMode = 'cart'; render(); };
+  header.appendChild(cartBtn);
+  wrap.appendChild(header);
+
+  if (!swipeStack.length) {
+    wrap.appendChild(el('div', 'empty', swipeCart.length ? 'All caught up — check your cart to confirm picks.' : 'No open global challenges to review right now.'));
+    return wrap;
+  }
+  wrap.appendChild(renderSwipeCard(swipeStack[0]));
+  return wrap;
+}
+
+function renderSwipeCart() {
+  const wrap = el('div');
+  const backBtn = el('button', null, '\u2190 Back to swiping');
+  backBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin-bottom:10px;';
+  backBtn.onclick = () => { challengeBrowseMode = 'swipe'; render(); };
+  wrap.appendChild(backBtn);
+
+  wrap.appendChild(el('div', 'week-header', `Your cart (${swipeCart.length})`));
+  if (!swipeCart.length) { wrap.appendChild(el('div', 'empty', 'No accepted challenges yet — swipe right on some first.')); return wrap; }
+
+  swipeCart.forEach((ch, i) => {
+    const row = el('div', 'pick-row');
+    const left = el('div');
+    const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
+    const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+    left.appendChild(el('div', 'who', ch.gameLabel));
+    left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u`));
+    row.appendChild(left);
+    const rmBtn = el('button', null, '\u2715');
+    rmBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:26px;height:26px;font-size:12px;';
+    rmBtn.onclick = () => { swipeCart.splice(i,1); render(); };
+    row.appendChild(rmBtn);
+    wrap.appendChild(row);
+  });
+
+  const confirmBtn = el('button', 'lock-btn', `Confirm ${swipeCart.length} challenge${swipeCart.length === 1 ? '' : 's'}`);
+  confirmBtn.style.marginTop = '12px';
+  confirmBtn.onclick = async () => {
+    confirmBtn.disabled = true; confirmBtn.textContent = 'Saving…';
+    const snapshot = swipeCart.slice();
+    snapshot.forEach(ch => {
+      const idx = allPicks.findIndex(p => p.id === ch.id);
+      if (idx > -1) { allPicks[idx].status = 'accepted'; allPicks[idx].acceptedBy = profile.name; }
+    });
+    try {
+      await savePicks(allPicks);
+      swipeCart = [];
+      challengeBrowseMode = 'list';
+      render();
+    } catch (e) {
+      snapshot.forEach(ch => {
+        const idx = allPicks.findIndex(p => p.id === ch.id);
+        if (idx > -1) { allPicks[idx].status = 'open'; allPicks[idx].acceptedBy = null; }
+      });
+      alert("Couldn't confirm (" + describeFetchError(e) + ") — try again.");
+      confirmBtn.disabled = false; confirmBtn.textContent = `Confirm ${snapshot.length} challenges`;
+    }
+  };
+  wrap.appendChild(confirmBtn);
+  return wrap;
+}
+
 function renderExistingChallenges() {
   const wrap = el('div');
   const toggle = el('div', 'league-scroller');
   [['global','Global'],['friends','Friends']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (existingChallengeView === id ? ' active' : ''), label);
-    pill.onclick = () => { existingChallengeView = id; render(); };
+    pill.onclick = () => { existingChallengeView = id; challengeBrowseMode = 'list'; render(); };
     toggle.appendChild(pill);
   });
   wrap.appendChild(toggle);
@@ -1704,6 +1871,42 @@ function renderExistingChallenges() {
     list = all.filter(ch => ch.visibility === 'friend' && (ch.creator === profile.name || ch.targetFriend === profile.name) && stillActive(ch));
   }
   list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  if (existingChallengeView === 'global') {
+    const genBtn = el('button', null, '\ud83c\udfb2 Generate 100 challenges from today\'s games');
+    genBtn.style.cssText = 'width:100%;background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:9px;font-size:12px;font-weight:700;margin-bottom:10px;';
+    genBtn.onclick = async () => {
+      genBtn.disabled = true; genBtn.textContent = 'Generating…';
+      const recs = generateHouseChallenges();
+      if (!recs.length) { alert('No new games available to generate from right now.'); genBtn.disabled = false; genBtn.textContent = "\ud83c\udfb2 Generate 100 challenges from today's games"; return; }
+      recs.forEach(r => allPicks.push(r));
+      try { await savePicks(allPicks); render(); }
+      catch (e) {
+        recs.forEach(r => { const i = allPicks.findIndex(x => x.id === r.id); if (i > -1) allPicks.splice(i,1); });
+        alert("Couldn't save (" + describeFetchError(e) + ") — try again.");
+        genBtn.disabled = false; genBtn.textContent = "\ud83c\udfb2 Generate 100 challenges from today's games";
+      }
+    };
+    wrap.appendChild(genBtn);
+
+    const modeToggle = el('div', 'league-scroller');
+    [['list','\ud83d\udccb List'],['swipe','\ud83d\udd25 Swipe mode']].forEach(([id,label]) => {
+      const pill = el('button', 'league-pill' + ((challengeBrowseMode === id || (challengeBrowseMode === 'cart' && id === 'swipe')) ? ' active' : ''), label);
+      pill.onclick = () => {
+        challengeBrowseMode = id;
+        if (id === 'swipe') {
+          const cartIds = new Set(swipeCart.map(c => c.id));
+          swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id));
+        }
+        render();
+      };
+      modeToggle.appendChild(pill);
+    });
+    wrap.appendChild(modeToggle);
+
+    if (challengeBrowseMode === 'swipe') { wrap.appendChild(renderSwipeMode()); return wrap; }
+    if (challengeBrowseMode === 'cart') { wrap.appendChild(renderSwipeCart()); return wrap; }
+  }
 
   wrap.appendChild(el('div', 'week-header', existingChallengeView === 'global' ? 'Open global challenges' : 'Your friend challenges'));
   if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
