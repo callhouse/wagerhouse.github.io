@@ -2686,11 +2686,7 @@ function renderChallengeRow(ch) {
   const card = el('div', 'event-card');
   if (ch.status === 'accepted') card.style.borderColor = '#4CAF50';
   else if (ch.status === 'open') card.style.borderColor = 'var(--text-faint)';
-  const top = el('div');
-  top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
-  const otherPerson = ch.creator === profile.name ? ch.targetFriend : ch.creator;
-  top.innerHTML = `<span style="font-size:11px;color:var(--text-faint);">${ch.visibility === 'public' ? '' : '\ud83d\udc64 ' + otherPerson}</span><span style="font-size:11px;color:var(--text-faint);">${new Date(ch.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`;
-  card.appendChild(top);
+  const postedDate = new Date(ch.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   card.appendChild(el('div', null, fullGameLabel(ch))).style.cssText = 'font-size:13.5px;font-weight:700;margin-bottom:2px;';
   const gTime = gameTimeLabel(ch.gameId);
   if (gTime) card.appendChild(el('div', null, gTime)).style.cssText = 'font-size:11px;color:var(--text-faint);margin-bottom:6px;';
@@ -2702,8 +2698,9 @@ function renderChallengeRow(ch) {
 
   if (ch.status === 'open') {
     if (ch.creator === profile.name) {
-      card.appendChild(el('div', 'no-odds-note', ch.visibility === 'public' ? 'waiting for someone to accept' : `Sent to ${ch.targetFriend} — waiting for a response`));
+      card.appendChild(el('div', 'no-odds-note', ch.visibility === 'public' ? `Posted ${postedDate} — waiting for someone to accept` : `Posted ${postedDate} — Sent to ${ch.targetFriend} — waiting for a response`));
     } else if (ch.visibility === 'friend' && ch.targetFriend === profile.name) {
+      card.appendChild(el('div', null, `From ${ch.creator} \u2014 ${postedDate}`)).style.cssText = 'font-size:11px;color:var(--text-faint);margin-bottom:8px;';
       const row = el('div'); row.style.cssText = 'display:flex;gap:8px;';
       const acceptBtn = el('button', 'lock-btn', 'Accept'); acceptBtn.style.flex = '1';
       acceptBtn.onclick = () => acceptChallenge(ch);
