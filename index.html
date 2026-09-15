@@ -31,10 +31,10 @@
   .menu-dropdown .menu-item:last-child { border-bottom: none; }
   .menu-dropdown .menu-item.danger { color: var(--danger); }
   .menu-dropdown .menu-item .sub { display: block; font-size: 11px; color: var(--text-faint); font-weight: 500; margin-top: 2px; }
-  .swipe-card-big { display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; max-width: 100%; box-sizing: border-box; }
-  .swipe-team-logo { width: 48px; height: 48px; object-fit: contain; }
+  .swipe-card-big { display: flex; flex-direction: column; justify-content: center; overflow-y: auto; overflow-x: hidden; max-width: 100%; max-height: 52vh; box-sizing: border-box; }
+  .swipe-team-logo { width: 40px; height: 40px; object-fit: contain; }
   .swipe-fixed-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 25; box-sizing: border-box; }
-  .swipe-bar-spacer { height: 84px; }
+  .swipe-bar-spacer { height: 76px; }
 
   .tabbar { display: flex; gap: 4px; }
   .tab { flex: 1; text-align: center; padding: 10px 4px; font-size: 12px; font-weight: 700; color: var(--text-faint); border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.02em; }
@@ -2322,8 +2322,8 @@ async function declineChallenge(ch) {
 function renderSwipeCard(ch) {
   const cardWrap = el('div');
   cardWrap.style.cssText = 'position:relative;touch-action:pan-y;user-select:none;';
-  const card = el('div', 'event-card swipe-card-big');
-  card.style.cssText += 'padding:24px;cursor:grab;';
+  const card = el('div', 'swipe-card-big');
+  card.style.cssText = 'padding:16px;cursor:grab;border-radius:14px;background:#F5F1E6;border:1px solid #D9D0BC;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
   const marketTxt = challengeMarketTxt(ch);
   const leagueLabel = (LEAGUES_META.find(l => l.id === ch.sport) || {}).label || (ch.sport || 'sport').toUpperCase();
   const gTime = gameTimeLabel(ch.gameId);
@@ -2334,39 +2334,39 @@ function renderSwipeCard(ch) {
   const homeLogo = homeAbbr ? teamLogo(ch.gameId, homeAbbr) : null;
 
   const top = el('div');
-  top.innerHTML = `<div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:4px;">${leagueLabel} \u00b7 from ${ch.creator}</div>${gTime ? `<div style="font-size:12px;color:var(--text-faint);">${gTime}</div>` : ''}`;
+  top.innerHTML = `<div style="font-size:10.5px;color:#5a5342;text-transform:uppercase;font-weight:800;margin-bottom:3px;">${leagueLabel} \u00b7 from ${ch.creator}</div>${gTime ? `<div style="font-size:11.5px;color:#5a5342;">${gTime}</div>` : ''}`;
   card.appendChild(top);
 
   const logoRow = el('div');
-  logoRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:20px;margin:24px 0;';
+  logoRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:14px;margin:14px 0;';
   if (awayLogo || homeLogo) {
     const awayCol = el('div'); awayCol.style.cssText = 'text-align:center;flex:1;min-width:0;';
     if (awayLogo) { const im = el('img'); im.src = awayLogo; im.className = 'swipe-team-logo'; awayCol.appendChild(im); }
-    awayCol.appendChild(el('div', null, fullTeamName(ch.gameId, awayAbbr))).style.cssText = 'font-size:12px;font-weight:700;margin-top:6px;';
+    awayCol.appendChild(el('div', null, fullTeamName(ch.gameId, awayAbbr))).style.cssText = 'font-size:11.5px;font-weight:800;margin-top:4px;color:#1a1a1a;';
     logoRow.appendChild(awayCol);
-    logoRow.appendChild(el('div', null, '@')).style.cssText = 'font-size:14px;color:var(--text-faint);font-weight:700;';
+    logoRow.appendChild(el('div', null, '@')).style.cssText = 'font-size:13px;color:#8a8168;font-weight:700;';
     const homeCol = el('div'); homeCol.style.cssText = 'text-align:center;flex:1;min-width:0;';
     if (homeLogo) { const im2 = el('img'); im2.src = homeLogo; im2.className = 'swipe-team-logo'; homeCol.appendChild(im2); }
-    homeCol.appendChild(el('div', null, fullTeamName(ch.gameId, homeAbbr))).style.cssText = 'font-size:12px;font-weight:700;margin-top:6px;';
+    homeCol.appendChild(el('div', null, fullTeamName(ch.gameId, homeAbbr))).style.cssText = 'font-size:11.5px;font-weight:800;margin-top:4px;color:#1a1a1a;';
     logoRow.appendChild(homeCol);
   } else {
-    logoRow.appendChild(el('div', null, fullGameLabel(ch))).style.cssText = 'font-size:18px;font-weight:800;text-align:center;';
+    logoRow.appendChild(el('div', null, fullGameLabel(ch))).style.cssText = 'font-size:15px;font-weight:800;text-align:center;color:#1a1a1a;';
   }
   card.appendChild(logoRow);
 
   const bottom = el('div');
   bottom.style.cssText = 'text-align:center;';
   bottom.innerHTML = `
-    <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;font-weight:700;letter-spacing:0.03em;margin-bottom:4px;">If you accept, you get</div>
-    <div style="font-size:30px;font-weight:800;color:var(--accent);margin-bottom:10px;">${marketTxt}</div>
-    <div style="font-size:15px;color:var(--text-dim);">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
+    <div style="font-size:10.5px;color:#5a5342;text-transform:uppercase;font-weight:800;letter-spacing:0.03em;margin-bottom:3px;">If you accept, you get</div>
+    <div style="font-size:23px;font-weight:800;color:#C1501F;margin-bottom:6px;">${marketTxt}</div>
+    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
   `;
   card.appendChild(bottom);
 
   const stampAccept = el('div', null, 'ACCEPT');
-  stampAccept.style.cssText = 'position:absolute;top:20px;left:20px;border:3px solid var(--accent);color:var(--accent);padding:4px 12px;font-weight:900;font-size:18px;border-radius:6px;transform:rotate(-15deg);opacity:0;pointer-events:none;';
+  stampAccept.style.cssText = 'position:absolute;top:16px;left:16px;border:3px solid #2E7D32;color:#2E7D32;padding:3px 10px;font-weight:900;font-size:16px;border-radius:6px;transform:rotate(-15deg);opacity:0;pointer-events:none;';
   const stampDecline = el('div', null, 'DECLINE');
-  stampDecline.style.cssText = 'position:absolute;top:20px;right:20px;border:3px solid var(--danger);color:var(--danger);padding:4px 12px;font-weight:900;font-size:18px;border-radius:6px;transform:rotate(15deg);opacity:0;pointer-events:none;';
+  stampDecline.style.cssText = 'position:absolute;top:16px;right:16px;border:3px solid #C62828;color:#C62828;padding:3px 10px;font-weight:900;font-size:16px;border-radius:6px;transform:rotate(15deg);opacity:0;pointer-events:none;';
   card.appendChild(stampAccept); card.appendChild(stampDecline);
   cardWrap.appendChild(card);
 
@@ -2402,7 +2402,7 @@ function renderSwipeCard(ch) {
 function renderSwipeMode() {
   const wrap = el('div');
   const header = el('div');
-  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
   header.appendChild(el('div', null, `${swipeStack.length} left to review`)).style.cssText = 'font-size:12px;color:var(--text-dim);';
   const cartBtn = el('button', null, `Review cart (${swipeCart.length})`);
   cartBtn.style.cssText = 'background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:7px 12px;font-size:12px;font-weight:700;';
