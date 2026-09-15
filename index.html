@@ -424,6 +424,19 @@ function saveProfile(p) {
   profile = p;
   try { localStorage.setItem('ww_profile', JSON.stringify(p)); } catch(e) {}
 }
+function loadNavState() {
+  try {
+    const v = localStorage.getItem('ww_nav');
+    if (!v) return;
+    const nav = JSON.parse(v);
+    if (nav.appSection) appSection = nav.appSection;
+    if (nav.activeTab) activeTab = nav.activeTab;
+    if (nav.existingChallengeView) existingChallengeView = nav.existingChallengeView;
+  } catch(e) {}
+}
+function saveNavState() {
+  try { localStorage.setItem('ww_nav', JSON.stringify({ appSection, activeTab, existingChallengeView })); } catch(e) {}
+}
 async function loadGlobalData() {
   try {
     const data = await fsGet();
@@ -458,6 +471,7 @@ function startPolling() {
 
 // ---------- render root ----------
 function render() {
+  saveNavState();
   try {
     renderInner();
   } catch (e) {
@@ -2628,6 +2642,7 @@ function renderLeaderboard() {
 
 (async function init() {
   loadProfile();
+  loadNavState();
   if (profile) {
     try {
       const g = await loadGlobalData();
