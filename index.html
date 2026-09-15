@@ -3691,7 +3691,13 @@ function renderGameCard(g, sport, meta) {
       [[g.away, awayRoster], [g.home, homeRoster]].forEach(([abbr, roster]) => {
         if (!roster || !roster.length) return;
         const grp = document.createElement('optgroup'); grp.label = abbr;
-        roster.forEach(p => { const o = document.createElement('option'); o.value = p.name; o.textContent = `${p.name} (${p.position})`; grp.appendChild(o); });
+        const posOrder = ['QB','RB','WR','TE','FB'];
+        const sortedRoster = roster.slice().sort((a,b) => {
+          const posDiff = posOrder.indexOf(a.position) - posOrder.indexOf(b.position);
+          if (posDiff !== 0) return posDiff;
+          return a.name.localeCompare(b.name);
+        });
+        sortedRoster.forEach(p => { const o = document.createElement('option'); o.value = p.name; o.textContent = `${p.name} (${p.position})`; grp.appendChild(o); });
         nameSel.appendChild(grp);
       });
       section.appendChild(nameSel);
