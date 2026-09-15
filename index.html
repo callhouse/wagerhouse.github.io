@@ -355,6 +355,8 @@ let unitFilterDebounce = null;
 let counterFormOpen = {};
 let friendsGlobalOpen = true;
 let friendsDirectOpen = true;
+let mineGlobalOpen = true;
+let mineDirectOpen = true;
 let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
@@ -3337,10 +3339,26 @@ function renderExistingChallenges() {
     return wrap;
   }
 
-  const headerText = 'Bets you\'ve posted';
-  wrap.appendChild(el('div', 'week-header', headerText));
-  if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
-  list.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
+  const mineGlobal = list.filter(ch => ch.visibility === 'public');
+  const mineDirect = list.filter(ch => ch.visibility === 'friend');
+
+  const mineGlobalHeader = el('div', 'week-header', `${mineGlobalOpen ? '\u25be' : '\u25b8'} Posted Globally (${mineGlobal.length})`);
+  mineGlobalHeader.style.cursor = 'pointer';
+  mineGlobalHeader.onclick = () => { mineGlobalOpen = !mineGlobalOpen; render(); };
+  wrap.appendChild(mineGlobalHeader);
+  if (mineGlobalOpen) {
+    if (!mineGlobal.length) { wrap.appendChild(el('div', 'empty', 'Nothing posted publicly right now.')); }
+    else { mineGlobal.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+  }
+
+  const mineDirectHeader = el('div', 'week-header', `${mineDirectOpen ? '\u25be' : '\u25b8'} Posted to Friends (${mineDirect.length})`);
+  mineDirectHeader.style.cursor = 'pointer';
+  mineDirectHeader.onclick = () => { mineDirectOpen = !mineDirectOpen; render(); };
+  wrap.appendChild(mineDirectHeader);
+  if (mineDirectOpen) {
+    if (!mineDirect.length) { wrap.appendChild(el('div', 'empty', 'Nothing sent to a friend right now.')); }
+    else { mineDirect.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+  }
   return wrap;
 }
 
