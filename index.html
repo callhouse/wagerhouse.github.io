@@ -701,6 +701,7 @@ async function completeLoginSetup() {
     try {
       await migrateLegacyWeeklyPicks();
       await cleanupStaleHouseBets();
+        await cleanupAcceptedChallengesOnce();
       if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
       await refreshGameLists();
       await topUpHouseChallenges();
@@ -1979,7 +1980,7 @@ function challengeStatusText(ch) {
     const r = settlePick(ch);
     if (r.status === 'pending') return `Accepted by ${ch.acceptedBy} — game not final yet`;
     if (r.status === 'push') return `Accepted by ${ch.acceptedBy} — pushed, no units changed hands`;
-    const iWon = r.status === 'win';
+    const iWon = r.status !== 'win'; // creator holds the opposite side of what they posted
     return iWon ? `Accepted by ${ch.acceptedBy} — you won ${ch.units}u` : `Accepted by ${ch.acceptedBy} — you lost ${ch.units}u`;
   }
   return ch.status;
@@ -2004,7 +2005,9 @@ function renderChallengeRow(ch) {
   if (gTime) card.appendChild(el('div', null, gTime)).style.cssText = 'font-size:11px;color:var(--text-faint);margin-bottom:6px;';
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
-  card.appendChild(el('div', null, `${ch.creator}'s pick: ${marketTxt} · ${ch.units}u`)).style.cssText = 'font-size:12.5px;color:var(--text-dim);margin-bottom:8px;';
+  const isMine = ch.creator === profile.name;
+  const slipLabel = isMine ? `You're offering: ${marketTxt} · ${ch.units}u` : `Take: ${marketTxt} · ${ch.units}u`;
+  card.appendChild(el('div', null, slipLabel)).style.cssText = 'font-size:12.5px;color:var(--text-dim);margin-bottom:8px;';
 
   if (ch.status === 'open') {
     if (ch.creator === profile.name) {
@@ -2028,21 +2031,19 @@ function renderChallengeRow(ch) {
   } else if (ch.status === 'declined') {
     card.appendChild(el('div', 'no-odds-note', `${ch.targetFriend} declined this challenge`));
   } else if (ch.status === 'accepted') {
-    const r = settlePick(ch);
-    const iAmCreator = ch.creator === profile.name;
-    const myOutcome = r.status === 'pending' ? 'pending' : r.status === 'push' ? 'push' : (iAmCreator ? r.status : (r.status === 'win' ? 'loss' : 'win'));
+    const myOutcome = myChallengeOutcome(ch) || 'pending';
     let txt, color;
     if (myOutcome === 'pending') { txt = `Accepted by ${ch.acceptedBy} — game not final yet`; color = 'var(--gold)'; }
     else if (myOutcome === 'push') { txt = 'Pushed — no units changed hands'; color = 'var(--gold)'; }
     else {
-      const opponent = iAmCreator ? ch.acceptedBy : ch.creator;
+      const opponent = isMine ? ch.acceptedBy : ch.creator;
       txt = myOutcome === 'win' ? `You won ${ch.units}u vs ${opponent}` : `You lost ${ch.units}u vs ${opponent}`;
       color = myOutcome === 'win' ? 'var(--accent)' : 'var(--danger)';
     }
     card.appendChild(el('div', null, txt)).style.cssText = `font-size:13px;font-weight:700;color:${color};`;
   }
 
-  if (ch.creator === profile.name) {
+  if (ch.creator === profile.name && ch.status === 'open') {
     const delBtn = el('button', null, '\u2715 Delete this challenge');
     delBtn.style.cssText = 'width:100%;margin-top:8px;background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;padding:7px;font-size:11px;font-weight:700;';
     delBtn.onclick = () => deleteChallenge(ch);
@@ -2051,10 +2052,8 @@ function renderChallengeRow(ch) {
   return card;
 }
 async function deleteChallenge(ch) {
-  const warn = ch.status === 'accepted'
-    ? `${ch.acceptedBy} has already accepted this challenge — deleting it will erase that too. Delete anyway?`
-    : 'Delete this challenge permanently?';
-  if (!confirm(warn)) return;
+  if (ch.status !== 'open') return; // can only withdraw a challenge before someone accepts it
+  if (!confirm('Delete this challenge permanently?')) return;
   const idx = allPicks.findIndex(p => p.id === ch.id);
   if (idx === -1) return;
   const removed = allPicks.splice(idx, 1)[0];
@@ -2161,6 +2160,7 @@ function renderSwipeCard(ch) {
     <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:10px;">${leagueLabel} · from ${ch.creator}</div>
     <div style="font-size:16px;font-weight:800;margin-bottom:2px;">${ch.gameLabel}</div>
     ${gTime ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">${gTime}</div>` : '<div style="margin-bottom:12px;"></div>'}
+    <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;font-weight:700;letter-spacing:0.03em;margin-bottom:2px;">If you accept, you get</div>
     <div style="font-size:24px;font-weight:800;color:var(--accent);margin-bottom:8px;">${marketTxt}</div>
     <div style="font-size:14px;color:var(--text-dim);">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
   `;
@@ -2333,8 +2333,9 @@ function myChallengeOutcome(ch) {
   if (r.status === 'pending') return null;
   if (r.status === 'push') return 'push';
   const iAmCreator = ch.creator === profile.name;
-  if (r.status === 'win') return iAmCreator ? 'win' : 'loss';
-  return iAmCreator ? 'loss' : 'win';
+  // ch.sideAbbr/line/spreadLabel represent the side the ACCEPTOR receives; the creator implicitly holds the opposite.
+  if (r.status === 'win') return iAmCreator ? 'loss' : 'win';
+  return iAmCreator ? 'win' : 'loss';
 }
 
 function renderCompletedChallenges() {
@@ -2455,7 +2456,7 @@ function renderGameCard(g, sport, meta) {
       const note = el('div', 'locked-note');
       const spreadTxt = betType === 'spread' ? pickSpreadDisplay(existing) : null;
       const marketTxt = betType === 'total' ? (existing.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existing.line : existing.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
-      note.innerHTML = `<div class="ln-title">Your challenge</div>${marketTxt} · <b>${existing.units}u</b><div style="margin-top:4px;font-size:11.5px;color:var(--text-dim);">${challengeStatusText(existing)}</div>`;
+      note.innerHTML = `<div class="ln-title">You're offering</div>${marketTxt} · <b>${existing.units}u</b><div style="margin-top:4px;font-size:11.5px;color:var(--text-dim);">${challengeStatusText(existing)}</div>`;
       section.appendChild(note);
       return section;
     }
@@ -2529,12 +2530,13 @@ function renderGameCard(g, sport, meta) {
       if (!side) { errEl.textContent = 'Pick a side first.'; return; }
       if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
       const friend = visSel.value || null;
+      const displaySide = betType === 'total' ? (side === 'OVER' ? 'UNDER' : 'OVER') : (side === g.home ? g.away : g.home);
       let line, spreadLabel;
       if (betType === 'total') {
         line = magnitude;
         spreadLabel = null;
       } else {
-        const isFav = side === favSide;
+        const isFav = displaySide === favSide;
         spreadLabel = magnitude === 0 ? 'PK' : (isFav ? '-' + magnitude : '+' + magnitude);
         line = magnitude === 0 ? 0 : (isFav ? -magnitude : magnitude);
       }
@@ -2542,7 +2544,7 @@ function renderGameCard(g, sport, meta) {
         id: profile.name + '_challenge_' + g.id + '_' + betType + '_' + Date.now(),
         poolType: 'challenge', creator: profile.name,
         sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
-        betType, sideAbbr: side, units, line, spreadLabel,
+        betType, sideAbbr: displaySide, units, line, spreadLabel,
         visibility: friend ? 'friend' : 'public',
         targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
@@ -2647,6 +2649,16 @@ async function cleanupStaleHouseBets() {
   const before = allPicks.length;
   allPicks = allPicks.filter(p => !(p.poolType === 'weekly' && !p.settledResult && p.weekKey !== today && p.weekKey !== yesterday));
   if (allPicks.length !== before) { try { await savePicks(allPicks); } catch (e) { /* best-effort; will retry next load */ } }
+}
+async function cleanupAcceptedChallengesOnce() {
+  const FLAG = 'ww_cleanup_accepted_semantics_v1';
+  try { if (localStorage.getItem(FLAG)) return; } catch (e) {}
+  const before = allPicks.length;
+  allPicks = allPicks.filter(p => !(p.poolType === 'challenge' && p.status === 'accepted'));
+  if (allPicks.length !== before) {
+    try { await savePicks(allPicks); } catch (e) { return; /* retry next load if save failed */ }
+  }
+  try { localStorage.setItem(FLAG, '1'); } catch (e) {}
 }
 function currentProfit(name) {
   return poolOnly(allPicks.filter(p => p.player === name)).reduce((s,p) => {
@@ -3120,6 +3132,7 @@ function renderLeaderboard() {
       try {
         await migrateLegacyWeeklyPicks();
         await cleanupStaleHouseBets();
+        await cleanupAcceptedChallengesOnce();
         if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
         await refreshGameLists();
         await topUpHouseChallenges();
