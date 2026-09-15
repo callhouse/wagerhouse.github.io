@@ -275,7 +275,8 @@ let trackerLeagueFilter = null; // sport id or null
 let trackerTeamFilter = null; // team abbr or null
 let trackerBetTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'moneyline' | 'parlay'
 let existingChallengeView = 'global'; // 'global' | 'friends'
-let challengeBrowseMode = 'list'; // 'list' | 'swipe' | 'cart'
+let challengeBrowseMode = 'swipe'; // 'swipe' | 'cart'
+let swipeStackInitialized = false;
 let swipeStack = [];
 let swipeCart = [];
 let trackerWizardLegs = []; // legs accumulated for an in-progress parlay, persists across wizard re-renders
@@ -530,7 +531,10 @@ function renderSetup() {
       const g = await loadGlobalData();
       players = g.players; allPicks = g.picks;
       await migrateLegacyWeeklyPicks();
+      await cleanupStaleHouseBets();
       if (!players.includes(name)) { players.push(name); await savePlayers(players); }
+      await refreshGameLists();
+      await topUpHouseChallenges();
       startPolling();
       startLiveScoreChecks();
       activeTab = 'games';
@@ -1004,7 +1008,7 @@ function renderDailyChallenge() {
     const usedMulligan = !!mulliganFor(profile.name, wk);
     options.forEach(opt => wrap.appendChild(renderDailyOptionCard(opt, remaining, options, usedMulligan)));
   }
-  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts; whatever's left carries you through the rest of the day.`));
+  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts, and reset fresh to ${HOUSE_BANK_TOTAL} every day.`));
   return wrap;
 }
 
@@ -1670,7 +1674,7 @@ function renderChallengeRow(ch) {
   return card;
 }
 
-function generateHouseChallenges() {
+function generateHouseChallenges(limit) {
   const pool = [];
   LEAGUES_META.filter(l => l.active).forEach(lg => {
     (DATA[lg.id] || []).forEach(g => {
@@ -1694,7 +1698,7 @@ function generateHouseChallenges() {
   );
   const fresh = pool.filter(o => !existingKeys.has(o.gameId + '_' + o.betType));
   for (let i = fresh.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [fresh[i], fresh[j]] = [fresh[j], fresh[i]]; }
-  const chosen = fresh.slice(0, 100);
+  const chosen = fresh.slice(0, limit || 100);
   return chosen.map(o => ({
     id: 'house_challenge_' + o.gameId + '_' + o.betType + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
     poolType: 'challenge', creator: 'House',
@@ -1703,6 +1707,16 @@ function generateHouseChallenges() {
     visibility: 'public', targetFriend: null, status: 'open', acceptedBy: null,
     timestamp: new Date().toISOString()
   }));
+}
+
+async function topUpHouseChallenges() {
+  const openCount = allPicks.filter(p => p.poolType === 'challenge' && p.creator === 'House' && p.status === 'open').length;
+  const needed = 100 - openCount;
+  if (needed <= 0) return;
+  const recs = generateHouseChallenges(needed);
+  if (!recs.length) return;
+  recs.forEach(r => allPicks.push(r));
+  try { await savePicks(allPicks); } catch (e) { /* best-effort; will retry next load */ }
 }
 
 async function acceptChallenge(ch) {
@@ -1837,7 +1851,8 @@ function renderSwipeCart() {
     try {
       await savePicks(allPicks);
       swipeCart = [];
-      challengeBrowseMode = 'list';
+      challengeBrowseMode = 'swipe';
+      swipeStackInitialized = false;
       render();
     } catch (e) {
       snapshot.forEach(ch => {
@@ -1857,7 +1872,7 @@ function renderExistingChallenges() {
   const toggle = el('div', 'league-scroller');
   [['global','Global'],['friends','Friends']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (existingChallengeView === id ? ' active' : ''), label);
-    pill.onclick = () => { existingChallengeView = id; challengeBrowseMode = 'list'; render(); };
+    pill.onclick = () => { existingChallengeView = id; challengeBrowseMode = 'swipe'; swipeStackInitialized = false; render(); };
     toggle.appendChild(pill);
   });
   wrap.appendChild(toggle);
@@ -1873,39 +1888,13 @@ function renderExistingChallenges() {
   list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   if (existingChallengeView === 'global') {
-    const genBtn = el('button', null, '\ud83c\udfb2 Generate 100 challenges from today\'s games');
-    genBtn.style.cssText = 'width:100%;background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:9px;font-size:12px;font-weight:700;margin-bottom:10px;';
-    genBtn.onclick = async () => {
-      genBtn.disabled = true; genBtn.textContent = 'Generating…';
-      const recs = generateHouseChallenges();
-      if (!recs.length) { alert('No new games available to generate from right now.'); genBtn.disabled = false; genBtn.textContent = "\ud83c\udfb2 Generate 100 challenges from today's games"; return; }
-      recs.forEach(r => allPicks.push(r));
-      try { await savePicks(allPicks); render(); }
-      catch (e) {
-        recs.forEach(r => { const i = allPicks.findIndex(x => x.id === r.id); if (i > -1) allPicks.splice(i,1); });
-        alert("Couldn't save (" + describeFetchError(e) + ") — try again.");
-        genBtn.disabled = false; genBtn.textContent = "\ud83c\udfb2 Generate 100 challenges from today's games";
-      }
-    };
-    wrap.appendChild(genBtn);
-
-    const modeToggle = el('div', 'league-scroller');
-    [['list','\ud83d\udccb List'],['swipe','\ud83d\udd25 Swipe mode']].forEach(([id,label]) => {
-      const pill = el('button', 'league-pill' + ((challengeBrowseMode === id || (challengeBrowseMode === 'cart' && id === 'swipe')) ? ' active' : ''), label);
-      pill.onclick = () => {
-        challengeBrowseMode = id;
-        if (id === 'swipe') {
-          const cartIds = new Set(swipeCart.map(c => c.id));
-          swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id));
-        }
-        render();
-      };
-      modeToggle.appendChild(pill);
-    });
-    wrap.appendChild(modeToggle);
-
-    if (challengeBrowseMode === 'swipe') { wrap.appendChild(renderSwipeMode()); return wrap; }
+    if (!swipeStackInitialized) {
+      const cartIds = new Set(swipeCart.map(c => c.id));
+      swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id));
+      swipeStackInitialized = true;
+    }
     if (challengeBrowseMode === 'cart') { wrap.appendChild(renderSwipeCart()); return wrap; }
+    wrap.appendChild(renderSwipeMode()); return wrap;
   }
 
   wrap.appendChild(el('div', 'week-header', existingChallengeView === 'global' ? 'Open global challenges' : 'Your friend challenges'));
@@ -2124,6 +2113,13 @@ async function migrateLegacyWeeklyPicks() {
     if (p.betType && !p.poolType) { p.poolType = 'weekly'; changed = true; }
   });
   if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; will retry next load */ } }
+}
+async function cleanupStaleHouseBets() {
+  const today = houseDayKey(new Date());
+  const yesterday = houseDayKey(new Date(Date.now() - 86400000));
+  const before = allPicks.length;
+  allPicks = allPicks.filter(p => !(p.poolType === 'weekly' && !p.settledResult && p.weekKey !== today && p.weekKey !== yesterday));
+  if (allPicks.length !== before) { try { await savePicks(allPicks); } catch (e) { /* best-effort; will retry next load */ } }
 }
 function currentProfit(name) {
   return poolOnly(allPicks.filter(p => p.player === name)).reduce((s,p) => {
@@ -2577,7 +2573,10 @@ function renderLeaderboard() {
       const g = await loadGlobalData();
       players = g.players; allPicks = g.picks;
       await migrateLegacyWeeklyPicks();
+      await cleanupStaleHouseBets();
       if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
+      await refreshGameLists();
+      await topUpHouseChallenges();
       startPolling();
       startLiveScoreChecks();
     } catch (e) {
