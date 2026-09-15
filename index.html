@@ -372,6 +372,11 @@ function fmtUnits(n) {
   const r = Math.round(n * 100) / 100;
   return (r > 0 ? '+' : '') + r.toFixed(2) + 'u';
 }
+function unitsToDollarLabel(units) {
+  if (!profile || !profile.unitSize) return null;
+  const dollars = units * profile.unitSize;
+  return '$' + dollars.toFixed(2);
+}
 // Returns spread as the HOME team's number: negative = home favored, positive = home underdog. null = no posted line.
 function computeSpread(sport, g) {
   const meta = LEAGUES_META.find(l => l.id === sport);
@@ -789,6 +794,12 @@ function renderProfileScreen() {
   const venmoInput = el('input'); venmoInput.value = profile.venmo || ''; venmoInput.placeholder = 'e.g. @jordan-smith';
   card.appendChild(venmoInput);
 
+  card.appendChild(el('label', null, 'Unit size ($)'));
+  const unitSizeInput = el('input'); unitSizeInput.type = 'number'; unitSizeInput.min = '0'; unitSizeInput.step = '0.5';
+  unitSizeInput.value = profile.unitSize || ''; unitSizeInput.placeholder = 'e.g. 5';
+  card.appendChild(unitSizeInput);
+  card.appendChild(el('div', 'setup-hint', 'Set what one unit is actually worth in real dollars — everywhere you see "5u" in the app, it\'ll also show the real amount based on this.'));
+
   const saveErr = el('div', 'pick-error');
   const saveBtn = el('button', 'lock-btn', 'Save changes');
   saveBtn.style.marginTop = '12px';
@@ -802,10 +813,11 @@ function renderProfileScreen() {
     saveErr.textContent = '';
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     const venmo = venmoInput.value.trim() || null;
+    const unitSize = unitSizeInput.value ? parseFloat(unitSizeInput.value) : null;
     const oldName = profile.name;
     try {
-      await saveProfileDoc(profile.uid, { name, venmo });
-      saveProfile({ ...profile, name, venmo });
+      await saveProfileDoc(profile.uid, { name, venmo, unitSize });
+      saveProfile({ ...profile, name, venmo, unitSize });
       if (name !== oldName && !players.includes(name)) { players.push(name); await savePlayers(players); }
       render();
     } catch (e) {
@@ -1641,7 +1653,7 @@ function renderTrackerWizard() {
   const step3 = el('div'); step3.style.display = 'none';
   const row3 = el('div'); row3.style.cssText = 'margin-bottom:10px;';
   const betTypeSel = el('select'); betTypeSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;box-sizing:border-box;';
-  [['spread','Spread'],['total','Total'],['moneyline','Moneyline']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; betTypeSel.appendChild(o); });
+  [['spread','Spread'],['total','Total'],['moneyline','ML']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; betTypeSel.appendChild(o); });
   row3.appendChild(betTypeSel);
   step3.appendChild(row3);
 
@@ -1938,7 +1950,7 @@ function renderKalshiSection() {
 
     // bet type filter chips
     const typeScroller = el('div', 'league-scroller');
-    [['all','All'], ['spread','Spread'], ['total','Total'], ['moneyline','Moneyline'], ['parlay','Parlay']].forEach(([mode,label]) => {
+    [['all','All'], ['spread','Spread'], ['total','Total'], ['moneyline','ML'], ['parlay','Parlay']].forEach(([mode,label]) => {
       const pill = el('button', 'league-pill' + (trackerBetTypeFilter === mode ? ' active' : ''), label);
       pill.onclick = () => { trackerBetTypeFilter = mode; render(); };
       typeScroller.appendChild(pill);
@@ -2070,13 +2082,13 @@ function renderGames() {
     games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
   }
   wrap.appendChild(list);
-  wrap.appendChild(el('div', 'refresh-note', 'Only games that haven\'t started yet are shown here, pulled from a rolling 7-day window. Spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard. Some smaller matchups won\'t have a posted spread — those show moneyline only.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Only games that haven\'t started yet are shown here, pulled from a rolling 7-day window. Spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard. Some smaller matchups won\'t have a posted spread — those show ML only.'));
   return wrap;
 }
 
 function renderGolfSection() {
   const wrap = el('div');
-  wrap.appendChild(el('div', 'setup-hint', "Golf challenges are moneyline bets: pick two players from the current tournament field, and whoever posts the lower score when the tournament finishes wins. Beta — double-check results once they settle."));
+  wrap.appendChild(el('div', 'setup-hint', "Golf challenges are ML bets: pick two players from the current tournament field, and whoever posts the lower score when the tournament finishes wins. Beta — double-check results once they settle."));
 
   if (!golfFieldCache) {
     if (!golfFieldAttempted) {
@@ -2158,6 +2170,12 @@ function renderGolfSection() {
   players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
   row2.appendChild(visSel);
   slip.appendChild(row2);
+  if (profile.unitSize) {
+    const dollarHint = el('div', null, unitsToDollarLabel(parseFloat(unitsInput.value) || 0));
+    dollarHint.style.cssText = 'font-size:11px;color:var(--text-faint);margin-top:4px;';
+    unitsInput.addEventListener('input', () => { dollarHint.textContent = unitsToDollarLabel(parseFloat(unitsInput.value) || 0) || ''; });
+    slip.appendChild(dollarHint);
+  }
 
   const createBtn = el('button', 'lock-btn', 'Pick two players first');
   createBtn.disabled = true;
@@ -2471,10 +2489,11 @@ function renderSwipeCard(ch) {
 
   const bottom = el('div');
   bottom.style.cssText = 'text-align:center;';
+  const dollarLabel = unitsToDollarLabel(ch.units);
   bottom.innerHTML = `
     <div style="font-size:10.5px;color:#5a5342;text-transform:uppercase;font-weight:800;letter-spacing:0.03em;margin-bottom:3px;">If you accept, you get</div>
     <div style="font-size:23px;font-weight:800;color:#C1501F;margin-bottom:6px;">${marketTxt}</div>
-    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
+    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}${dollarLabel ? ' \u00b7 ' + dollarLabel : ''}</div>
   `;
   card.appendChild(bottom);
 
@@ -2576,7 +2595,8 @@ function renderSwipeCart() {
     left.appendChild(el('div', 'who', fullGameLabel(ch)));
     const gTime = gameTimeLabel(ch.gameId);
     if (gTime) left.appendChild(el('div', 'detail', gTime));
-    left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u`));
+    const dollarLabel = unitsToDollarLabel(ch.units);
+    left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u${dollarLabel ? ' (' + dollarLabel + ')' : ''}`));
     left.appendChild(el('div', 'detail', `From ${ch.creator}`));
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
@@ -2587,7 +2607,8 @@ function renderSwipeCart() {
   });
 
   const totalCartUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
-  const confirmLabel = (n, u) => `Confirm ${n} Challenge${n === 1 ? '' : 's'} (Total ${u} Unit${u === 1 ? '' : 's'})`;
+  const totalCartDollar = unitsToDollarLabel(totalCartUnits);
+  const confirmLabel = (n, u) => `Confirm ${n} Challenge${n === 1 ? '' : 's'} (Total ${u} Unit${u === 1 ? '' : 's'}${totalCartDollar ? ' \u00b7 ' + totalCartDollar : ''})`;
   const confirmBtn = el('button', 'lock-btn', confirmLabel(swipeCart.length, totalCartUnits));
   confirmBtn.style.marginTop = '12px';
   confirmBtn.onclick = async () => {
@@ -2663,7 +2684,7 @@ function renderExistingChallenges() {
   });
 
   const typeScroller = el('div', 'league-scroller');
-  [['all','All'],['spread','Spread'],['total','Total'],['moneyline','Moneyline'],['player','Player Prop']].forEach(([id,label]) => {
+  [['all','All'],['spread','Spread'],['total','Total'],['moneyline','ML'],['player','Player Prop']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (openChallengeTypeFilter === id ? ' active' : ''), label);
     pill.onclick = () => { openChallengeTypeFilter = id; swipeStackInitialized = false; render(); };
     typeScroller.appendChild(pill);
@@ -2960,6 +2981,12 @@ function renderGameCard(g, sport, meta) {
     players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
     row2.appendChild(visSel);
     slip.appendChild(row2);
+    if (profile.unitSize) {
+      const dollarHint = el('div', null, unitsToDollarLabel(parseFloat(unitsInput.value) || 0));
+      dollarHint.style.cssText = 'font-size:11px;color:var(--text-faint);margin-top:4px;';
+      unitsInput.addEventListener('input', () => { dollarHint.textContent = unitsToDollarLabel(parseFloat(unitsInput.value) || 0) || ''; });
+      slip.appendChild(dollarHint);
+    }
 
     const createBtn = el('button', 'lock-btn', 'Select a side');
     createBtn.disabled = true;
@@ -3085,6 +3112,12 @@ function renderGameCard(g, sport, meta) {
     players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel2.appendChild(o); });
     row2.appendChild(visSel2);
     slip.appendChild(row2);
+    if (profile.unitSize) {
+      const dollarHint = el('div', null, unitsToDollarLabel(parseFloat(unitsInput2.value) || 0));
+      dollarHint.style.cssText = 'font-size:11px;color:var(--text-faint);margin-top:4px;';
+      unitsInput2.addEventListener('input', () => { dollarHint.textContent = unitsToDollarLabel(parseFloat(unitsInput2.value) || 0) || ''; });
+      slip.appendChild(dollarHint);
+    }
 
     const createBtn2 = el('button', 'lock-btn', 'Select Over or Under');
     createBtn2.disabled = true;
@@ -3133,7 +3166,7 @@ function renderGameCard(g, sport, meta) {
   pillRow.style.cssText = 'padding:10px 0 0;margin:0;';
   const types = [];
   if (hasSpread) types.push(['spread', 'Spread', !!openSpread]);
-  if (hasMoneyline) types.push(['moneyline', 'Moneyline', !!openMoneyline]);
+  if (hasMoneyline) types.push(['moneyline', 'ML', !!openMoneyline]);
   if (hasTotal) types.push(['total', 'Total', !!openTotal]);
   if (hasPlayerProp) {
     const hasOpenPlayerProp = allPicks.some(p => p.poolType === 'challenge' && p.propType === 'player' && p.creator === profile.name && p.gameId === g.id && p.status === 'open');
