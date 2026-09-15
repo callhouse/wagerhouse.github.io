@@ -372,11 +372,6 @@ function fmtUnits(n) {
   const r = Math.round(n * 100) / 100;
   return (r > 0 ? '+' : '') + r.toFixed(2) + 'u';
 }
-function unitsToDollarLabel(units) {
-  if (!profile || !profile.unitSize) return null;
-  const dollars = units * profile.unitSize;
-  return '$' + dollars.toFixed(2);
-}
 // Returns spread as the HOME team's number: negative = home favored, positive = home underdog. null = no posted line.
 function computeSpread(sport, g) {
   const meta = LEAGUES_META.find(l => l.id === sport);
@@ -662,6 +657,9 @@ function renderInner() {
   if (appSection === 'profile') {
     document.getElementById('tabbar').innerHTML = '';
     main.appendChild(renderProfileScreen());
+  } else if (appSection === 'account') {
+    document.getElementById('tabbar').innerHTML = '';
+    main.appendChild(renderAccountScreen());
   } else if (appSection === 'daily') {
     document.getElementById('tabbar').innerHTML = '';
     main.appendChild(renderDailyChallenge());
@@ -694,6 +692,11 @@ function renderMenu() {
   profileItem.innerHTML = `${profile.name}<span class="sub">@${profile.username || ''}</span>`;
   profileItem.onclick = () => { menuOpen = false; appSection = 'profile'; render(); };
   dd.appendChild(profileItem);
+  const accountItem = document.createElement('div');
+  accountItem.className = 'menu-item';
+  accountItem.textContent = 'Account';
+  accountItem.onclick = () => { menuOpen = false; appSection = 'account'; render(); };
+  dd.appendChild(accountItem);
   const logoutItem = document.createElement('div');
   logoutItem.className = 'menu-item danger';
   logoutItem.textContent = 'Log out';
@@ -794,12 +797,6 @@ function renderProfileScreen() {
   const venmoInput = el('input'); venmoInput.value = profile.venmo || ''; venmoInput.placeholder = 'e.g. @jordan-smith';
   card.appendChild(venmoInput);
 
-  card.appendChild(el('label', null, 'Unit size ($)'));
-  const unitSizeInput = el('input'); unitSizeInput.type = 'number'; unitSizeInput.min = '0'; unitSizeInput.step = '0.5';
-  unitSizeInput.value = profile.unitSize || ''; unitSizeInput.placeholder = 'e.g. 5';
-  card.appendChild(unitSizeInput);
-  card.appendChild(el('div', 'setup-hint', 'Set what one unit is actually worth in real dollars — everywhere you see "5u" in the app, it\'ll also show the real amount based on this.'));
-
   const saveErr = el('div', 'pick-error');
   const saveBtn = el('button', 'lock-btn', 'Save changes');
   saveBtn.style.marginTop = '12px';
@@ -813,11 +810,10 @@ function renderProfileScreen() {
     saveErr.textContent = '';
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     const venmo = venmoInput.value.trim() || null;
-    const unitSize = unitSizeInput.value ? parseFloat(unitSizeInput.value) : null;
     const oldName = profile.name;
     try {
-      await saveProfileDoc(profile.uid, { name, venmo, unitSize });
-      saveProfile({ ...profile, name, venmo, unitSize });
+      await saveProfileDoc(profile.uid, { name, venmo });
+      saveProfile({ ...profile, name, venmo });
       if (name !== oldName && !players.includes(name)) { players.push(name); await savePlayers(players); }
       render();
     } catch (e) {
@@ -896,6 +892,91 @@ function renderProfileScreen() {
     }
   };
 
+  return wrap;
+}
+
+function accountTxsFor(name) {
+  return allPicks.filter(p => p.poolType === 'accountTx' && p.player === name);
+}
+function accountBalanceFor(name) {
+  return accountTxsFor(name).reduce((s,tx) => s + (tx.type === 'deposit' ? tx.amount : -tx.amount), 0);
+}
+function renderAccountScreen() {
+  const wrap = el('div');
+  const backBtn = el('button', null, '\u2190 Back');
+  backBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin-bottom:12px;';
+  backBtn.onclick = () => { appSection = 'daily'; render(); };
+  wrap.appendChild(backBtn);
+
+  const balance = accountBalanceFor(profile.name);
+  const banner = el('div', 'rank-banner');
+  const c1 = el('div', 'rank-cell');
+  c1.appendChild(el('div', 'rc-label', 'Account balance'));
+  c1.appendChild(el('div', 'rc-value accent', '$' + balance.toFixed(2)));
+  banner.appendChild(c1);
+  wrap.appendChild(banner);
+
+  const card = el('div', 'setup-card');
+  card.style.marginTop = '14px';
+  card.appendChild(el('div', null, 'Deposit or withdraw')).style.cssText = 'font-size:16px;font-weight:800;margin-bottom:4px;';
+
+  card.appendChild(el('label', null, 'Amount ($)'));
+  const amtInput = el('input'); amtInput.type = 'number'; amtInput.min = '0.01'; amtInput.step = '0.01'; amtInput.placeholder = 'e.g. 50';
+  card.appendChild(amtInput);
+
+  const btnRow = el('div'); btnRow.style.cssText = 'display:flex;gap:8px;margin-top:12px;';
+  const depositBtn = el('button', 'lock-btn', 'Deposit'); depositBtn.style.flex = '1';
+  const withdrawBtn = el('button', null, 'Withdraw');
+  withdrawBtn.style.cssText = 'flex:1;background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:11px;font-weight:700;font-size:14px;';
+  btnRow.appendChild(depositBtn); btnRow.appendChild(withdrawBtn);
+  card.appendChild(btnRow);
+
+  const errEl = el('div', 'pick-error');
+  card.appendChild(errEl);
+  wrap.appendChild(card);
+
+  async function recordTx(type) {
+    const amount = parseFloat(amtInput.value);
+    errEl.textContent = '';
+    if (!amount || amount <= 0) { errEl.textContent = 'Enter a valid amount.'; return; }
+    if (type === 'withdraw' && amount > balance) { errEl.textContent = "You can't withdraw more than your current balance."; return; }
+    const tx = {
+      id: profile.name + '_accounttx_' + Date.now(),
+      poolType: 'accountTx', player: profile.name, type, amount,
+      timestamp: new Date().toISOString()
+    };
+    depositBtn.disabled = true; withdrawBtn.disabled = true;
+    allPicks.push(tx);
+    try {
+      await savePicks(allPicks);
+      amtInput.value = '';
+      render();
+    } catch (e) {
+      allPicks.pop();
+      errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
+      depositBtn.disabled = false; withdrawBtn.disabled = false;
+    }
+  }
+  depositBtn.onclick = () => recordTx('deposit');
+  withdrawBtn.onclick = () => recordTx('withdraw');
+
+  const txs = accountTxsFor(profile.name).slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  wrap.appendChild(el('div', 'week-header', 'History'));
+  if (!txs.length) {
+    wrap.appendChild(el('div', 'empty', 'No deposits or withdrawals yet.'));
+  } else {
+    txs.forEach(tx => {
+      const row = el('div', 'pick-row');
+      const left = el('div');
+      left.appendChild(el('div', 'who', tx.type === 'deposit' ? 'Deposit' : 'Withdrawal'));
+      left.appendChild(el('div', 'detail', new Date(tx.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })));
+      row.appendChild(left);
+      const amtEl = el('div', null, (tx.type === 'deposit' ? '+' : '-') + '$' + tx.amount.toFixed(2));
+      amtEl.style.cssText = `font-family:var(--font-mono);font-weight:800;font-size:14px;color:${tx.type === 'deposit' ? '#4CAF50' : 'var(--danger)'};`;
+      row.appendChild(amtEl);
+      wrap.appendChild(row);
+    });
+  }
   return wrap;
 }
 
@@ -2170,12 +2251,6 @@ function renderGolfSection() {
   players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
   row2.appendChild(visSel);
   slip.appendChild(row2);
-  if (profile.unitSize) {
-    const dollarHint = el('div', null, unitsToDollarLabel(parseFloat(unitsInput.value) || 0));
-    dollarHint.style.cssText = 'font-size:11px;color:var(--text-faint);margin-top:4px;';
-    unitsInput.addEventListener('input', () => { dollarHint.textContent = unitsToDollarLabel(parseFloat(unitsInput.value) || 0) || ''; });
-    slip.appendChild(dollarHint);
-  }
 
   const createBtn = el('button', 'lock-btn', 'Pick two players first');
   createBtn.disabled = true;
@@ -2489,11 +2564,10 @@ function renderSwipeCard(ch) {
 
   const bottom = el('div');
   bottom.style.cssText = 'text-align:center;';
-  const dollarLabel = unitsToDollarLabel(ch.units);
   bottom.innerHTML = `
     <div style="font-size:10.5px;color:#5a5342;text-transform:uppercase;font-weight:800;letter-spacing:0.03em;margin-bottom:3px;">If you accept, you get</div>
     <div style="font-size:23px;font-weight:800;color:#C1501F;margin-bottom:6px;">${marketTxt}</div>
-    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}${dollarLabel ? ' \u00b7 ' + dollarLabel : ''}</div>
+    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
   `;
   card.appendChild(bottom);
 
@@ -2595,8 +2669,7 @@ function renderSwipeCart() {
     left.appendChild(el('div', 'who', fullGameLabel(ch)));
     const gTime = gameTimeLabel(ch.gameId);
     if (gTime) left.appendChild(el('div', 'detail', gTime));
-    const dollarLabel = unitsToDollarLabel(ch.units);
-    left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u${dollarLabel ? ' (' + dollarLabel + ')' : ''}`));
+    left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u`));
     left.appendChild(el('div', 'detail', `From ${ch.creator}`));
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
@@ -2607,8 +2680,7 @@ function renderSwipeCart() {
   });
 
   const totalCartUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
-  const totalCartDollar = unitsToDollarLabel(totalCartUnits);
-  const confirmLabel = (n, u) => `Confirm ${n} Challenge${n === 1 ? '' : 's'} (Total ${u} Unit${u === 1 ? '' : 's'}${totalCartDollar ? ' \u00b7 ' + totalCartDollar : ''})`;
+  const confirmLabel = (n, u) => `Confirm ${n} Challenge${n === 1 ? '' : 's'} (Total ${u} Unit${u === 1 ? '' : 's'})`;
   const confirmBtn = el('button', 'lock-btn', confirmLabel(swipeCart.length, totalCartUnits));
   confirmBtn.style.marginTop = '12px';
   confirmBtn.onclick = async () => {
@@ -2981,12 +3053,6 @@ function renderGameCard(g, sport, meta) {
     players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
     row2.appendChild(visSel);
     slip.appendChild(row2);
-    if (profile.unitSize) {
-      const dollarHint = el('div', null, unitsToDollarLabel(parseFloat(unitsInput.value) || 0));
-      dollarHint.style.cssText = 'font-size:11px;color:var(--text-faint);margin-top:4px;';
-      unitsInput.addEventListener('input', () => { dollarHint.textContent = unitsToDollarLabel(parseFloat(unitsInput.value) || 0) || ''; });
-      slip.appendChild(dollarHint);
-    }
 
     const createBtn = el('button', 'lock-btn', 'Select a side');
     createBtn.disabled = true;
@@ -3112,12 +3178,6 @@ function renderGameCard(g, sport, meta) {
     players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel2.appendChild(o); });
     row2.appendChild(visSel2);
     slip.appendChild(row2);
-    if (profile.unitSize) {
-      const dollarHint = el('div', null, unitsToDollarLabel(parseFloat(unitsInput2.value) || 0));
-      dollarHint.style.cssText = 'font-size:11px;color:var(--text-faint);margin-top:4px;';
-      unitsInput2.addEventListener('input', () => { dollarHint.textContent = unitsToDollarLabel(parseFloat(unitsInput2.value) || 0) || ''; });
-      slip.appendChild(dollarHint);
-    }
 
     const createBtn2 = el('button', 'lock-btn', 'Select Over or Under');
     createBtn2.disabled = true;
@@ -3436,7 +3496,7 @@ async function persistNewlySettledGolfH2H() {
   return changed;
 }
 
-function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan' && p.poolType !== 'swipeSkip' && p.poolType !== 'swipeCartItem'); }
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan' && p.poolType !== 'swipeSkip' && p.poolType !== 'swipeCartItem' && p.poolType !== 'accountTx'); }
 async function migrateLegacyWeeklyPicks() {
   let changed = false;
   allPicks.forEach(p => {
@@ -3485,7 +3545,7 @@ function rankAmong(valueForName) {
   return { rank: idx + 1, total: arr.length };
 }
 
-function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan' || p.poolType === 'swipeSkip' || p.poolType === 'swipeCartItem') return false; return !gameIndex[p.gameId]; }
+function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan' || p.poolType === 'swipeSkip' || p.poolType === 'swipeCartItem' || p.poolType === 'accountTx') return false; return !gameIndex[p.gameId]; }
 
 async function deletePick(pickId) {
   const idx = allPicks.findIndex(p => p.id === pickId);
