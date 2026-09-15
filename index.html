@@ -357,6 +357,7 @@ let friendsGlobalOpen = true;
 let friendsDirectOpen = true;
 let mineGlobalOpen = true;
 let mineDirectOpen = true;
+let minimizedGameCards = {};
 let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
@@ -3485,10 +3486,30 @@ function renderGameCard(g, sport, meta) {
   const homeWon = completed && homeScore > awayScore;
   const awayWon = completed && awayScore > homeScore;
 
+  if (minimizedGameCards[g.id]) {
+    const mini = el('div', 'event-card');
+    mini.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;';
+    const label = el('span', null, `${(meta.label || sport.toUpperCase())} \u2013 ${g.away} @ ${g.home}`);
+    label.style.cssText = 'font-size:12px;font-weight:700;color:var(--text-dim);';
+    mini.appendChild(label);
+    const expandBtn = el('button', null, '+');
+    expandBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;width:26px;height:26px;font-size:14px;font-weight:800;flex-shrink:0;';
+    expandBtn.onclick = () => { minimizedGameCards[g.id] = false; render(); };
+    mini.appendChild(expandBtn);
+    return mini;
+  }
+
   const card = el('div', 'event-card');
   const top = el('div', 'event-top');
   top.appendChild(el('span', 'event-meta' + (st.live ? ' live' : ''), st.text));
-  top.appendChild(el('span', 'event-meta', g.title || g.local_start));
+  const topRight = el('div');
+  topRight.style.cssText = 'display:flex;align-items:center;gap:8px;';
+  topRight.appendChild(el('span', 'event-meta', g.title || g.local_start));
+  const minimizeBtn = el('button', null, '\u2212');
+  minimizeBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;width:22px;height:22px;font-size:14px;font-weight:800;line-height:1;flex-shrink:0;';
+  minimizeBtn.onclick = () => { minimizedGameCards[g.id] = true; render(); };
+  topRight.appendChild(minimizeBtn);
+  top.appendChild(topRight);
   card.appendChild(top);
 
   [{ ab: g.away, t: away, sc: awayScore, won: awayWon, lost: homeWon },
