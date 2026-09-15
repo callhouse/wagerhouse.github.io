@@ -181,14 +181,15 @@ async function fetchSportGames(sport) {
   });
   const seen = new Set();
   const events = [];
-  for (const date of dateStrs) {
+  const results = await Promise.all(dateStrs.map(async (date) => {
     try {
       const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${league}/scoreboard?dates=${date}&limit=300`);
-      if (!res.ok) continue;
+      if (!res.ok) return [];
       const json = await res.json();
-      (json.events || []).forEach(ev => { if (!seen.has(ev.id)) { seen.add(ev.id); events.push(ev); } });
-    } catch (e) { /* best-effort per date */ }
-  }
+      return json.events || [];
+    } catch (e) { return []; /* best-effort per date */ }
+  }));
+  results.flat().forEach(ev => { if (!seen.has(ev.id)) { seen.add(ev.id); events.push(ev); } });
   return events.map(ev => {
     const comp = ev.competitions && ev.competitions[0];
     if (!comp) return null;
@@ -230,14 +231,16 @@ async function fetchSportGames(sport) {
 let gamesLoaded = false;
 async function refreshGameLists() {
   const before = JSON.stringify(DATA);
-  for (const sport of Object.keys(ESPN_PATHS)) {
+  const activeSports = Object.keys(ESPN_PATHS).filter(sport => {
     const meta = LEAGUES_META.find(l => l.id === sport);
-    if (!meta || !meta.active) continue;
+    return meta && meta.active;
+  });
+  await Promise.all(activeSports.map(async (sport) => {
     try {
       const games = await fetchSportGames(sport);
       if (games.length) DATA[sport] = games;
     } catch (e) { /* keep previous list for this sport on failure */ }
-  }
+  }));
   rebuildGameIndex();
   gamesLoaded = true;
   return JSON.stringify(DATA) !== before;
@@ -530,15 +533,20 @@ function renderSetup() {
       saveProfile({ name });
       const g = await loadGlobalData();
       players = g.players; allPicks = g.picks;
-      await migrateLegacyWeeklyPicks();
-      await cleanupStaleHouseBets();
-      if (!players.includes(name)) { players.push(name); await savePlayers(players); }
-      await refreshGameLists();
-      await topUpHouseChallenges();
-      startPolling();
-      startLiveScoreChecks();
       activeTab = 'games';
       render();
+      (async () => {
+        try {
+          await migrateLegacyWeeklyPicks();
+          await cleanupStaleHouseBets();
+          if (!players.includes(name)) { players.push(name); await savePlayers(players); }
+          await refreshGameLists();
+          await topUpHouseChallenges();
+          startPolling();
+          startLiveScoreChecks();
+          render();
+        } catch (e) { /* best-effort background setup; core app is already usable */ }
+      })();
     } catch (e) {
       setupError = "Couldn't connect (" + describeFetchError(e) + ") — try again in a moment.";
       joinBtn.disabled = false; joinBtn.textContent = 'Continue';
@@ -2614,16 +2622,28 @@ function renderLeaderboard() {
     try {
       const g = await loadGlobalData();
       players = g.players; allPicks = g.picks;
-      await migrateLegacyWeeklyPicks();
-      await cleanupStaleHouseBets();
-      if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
-      await refreshGameLists();
-      await topUpHouseChallenges();
-      startPolling();
-      startLiveScoreChecks();
     } catch (e) {
       setupError = "Had trouble connecting to the shared board (" + describeFetchError(e) + ") — you can still continue.";
     }
+  }
+  render();
+
+  if (profile) {
+    (async () => {
+      try {
+        await migrateLegacyWeeklyPicks();
+        await cleanupStaleHouseBets();
+        if (!players.includes(profile.name)) { players.push(profile.name); await savePlayers(players); }
+        await refreshGameLists();
+        await topUpHouseChallenges();
+        startPolling();
+        startLiveScoreChecks();
+        render();
+      } catch (e) {
+        setupError = "Had trouble connecting to the shared board (" + describeFetchError(e) + ") — you can still continue.";
+        render();
+      }
+    })();
   }
   render();
 })();
