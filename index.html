@@ -1991,6 +1991,16 @@ function gameTimeLabel(gameId) {
   if (!idx || !idx.game || !idx.game.start) return null;
   return new Date(idx.game.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+function fullTeamName(gameId, abbr) {
+  const idx = gameIndex[gameId];
+  if (idx && idx.game && idx.game.teams && idx.game.teams[abbr]) return idx.game.teams[abbr].name;
+  return abbr;
+}
+function challengeMarketTxt(ch) {
+  const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
+  if (ch.betType === 'total') return (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line;
+  return fullTeamName(ch.gameId, ch.sideAbbr) + (spreadTxt ? ' ' + spreadTxt : '');
+}
 
 function renderChallengeRow(ch) {
   const card = el('div', 'event-card');
@@ -2004,7 +2014,7 @@ function renderChallengeRow(ch) {
   const gTime = gameTimeLabel(ch.gameId);
   if (gTime) card.appendChild(el('div', null, gTime)).style.cssText = 'font-size:11px;color:var(--text-faint);margin-bottom:6px;';
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
-  const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+  const marketTxt = challengeMarketTxt(ch);
   const isMine = ch.creator === profile.name;
   const slipLabel = isMine ? `You're offering: ${marketTxt} · ${ch.units}u` : `Take: ${marketTxt} · ${ch.units}u`;
   card.appendChild(el('div', null, slipLabel)).style.cssText = 'font-size:12.5px;color:var(--text-dim);margin-bottom:8px;';
@@ -2153,7 +2163,7 @@ function renderSwipeCard(ch) {
   const card = el('div', 'event-card');
   card.style.cssText += 'padding:22px;cursor:grab;';
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
-  const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+  const marketTxt = challengeMarketTxt(ch);
   const leagueLabel = (LEAGUES_META.find(l => l.id === ch.sport) || {}).label || (ch.sport || 'sport').toUpperCase();
   const gTime = gameTimeLabel(ch.gameId);
   card.innerHTML = `
@@ -2241,7 +2251,7 @@ function renderSwipeCart() {
     const row = el('div', 'pick-row');
     const left = el('div');
     const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
-    const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+    const marketTxt = challengeMarketTxt(ch);
     left.appendChild(el('div', 'who', ch.gameLabel));
     const gTime = gameTimeLabel(ch.gameId);
     if (gTime) left.appendChild(el('div', 'detail', gTime));
