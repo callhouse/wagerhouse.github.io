@@ -2103,10 +2103,10 @@ function renderGolfSection() {
   oddsWrap.style.cssText = 'margin-top:8px;';
   oddsWrap.appendChild(el('div', null, 'Payout odds for whoever accepts')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:6px;';
   const oddsRow = el('div'); oddsRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
-  [['1','Even (1:1)'],['2','2:1'],['3','3:1'],['0.5','1:2'],['0.333333333','1:3']].forEach(([val,label], i) => {
+  [['3','3:1'],['2','2:1'],['1','Even (1:1)'],['0.5','1:2'],['0.333333333','1:3']].forEach(([val,label], i) => {
     const btn = el('button', null, label);
     btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;';
-    if (i === 0) { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
+    if (val === '1') { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
     btn.onclick = () => {
       oddsMultiplier = parseFloat(val);
       oddsRow.querySelectorAll('button').forEach(b => { b.style.borderColor = 'var(--border)'; b.style.color = 'var(--text-dim)'; });
@@ -2229,7 +2229,7 @@ function challengeMarketTxt(ch) {
   }
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   if (ch.betType === 'total') return (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line;
-  if (ch.betType === 'spread' && !spreadTxt) {
+  if (ch.betType === 'moneyline' || (ch.betType === 'spread' && !spreadTxt)) {
     const odds = oddsLabel(ch.oddsMultiplier);
     return fullTeamName(ch.gameId, ch.sideAbbr) + ` (ML${odds ? ' ' + odds : ''})`;
   }
@@ -2659,7 +2659,7 @@ function renderExistingChallenges() {
   });
   const list = openChallengeTypeFilter === 'all' ? byDate : byDate.filter(ch => {
     if (openChallengeTypeFilter === 'player') return ch.propType === 'player';
-    if (openChallengeTypeFilter === 'moneyline') return ch.propType === 'golf_h2h' || (ch.betType === 'spread' && !ch.propType && !ch.spreadLabel);
+    if (openChallengeTypeFilter === 'moneyline') return ch.propType === 'golf_h2h' || ch.betType === 'moneyline' || (ch.betType === 'spread' && !ch.propType && !ch.spreadLabel);
     if (openChallengeTypeFilter === 'spread') return !ch.propType && ch.betType === 'spread' && !!ch.spreadLabel;
     return !ch.propType && ch.betType === openChallengeTypeFilter;
   });
@@ -2824,15 +2824,16 @@ function renderGameCard(g, sport, meta) {
   const totalVal = g.overUnder;
   const favSide = spread !== null ? (spread <= 0 ? g.home : g.away) : null;
   const moneylineOnly = !!(LEAGUES_META.find(l => l.id === sport) || {}).moneylineOnly;
-  const hasSpread = true; // always offer this market — falls back to moneyline when no spread number is posted
-  const spreadPillLabel = (moneylineOnly || spread === null) ? 'Moneyline' : 'Spread';
+  const hasSpread = !moneylineOnly && spread !== null;
+  const hasMoneyline = true; // always available independent of whether a spread is posted — same as a real sportsbook
   const hasTotal = !moneylineOnly && totalVal !== null && totalVal !== undefined;
   const hasPlayerProp = sport === 'nfl';
   const openSpread = myChallengeFor(g.id, 'spread');
   const openTotal = myChallengeFor(g.id, 'total');
+  const openMoneyline = myChallengeFor(g.id, 'moneyline');
 
   if (challengeTypeSelection[g.id] === undefined) {
-    challengeTypeSelection[g.id] = hasSpread ? 'spread' : (hasTotal ? 'total' : 'playerprop');
+    challengeTypeSelection[g.id] = hasSpread ? 'spread' : (hasTotal ? 'total' : (hasMoneyline ? 'moneyline' : 'playerprop'));
   }
 
   function renderPoolMarket(betType, hasMarket, defaultMagnitude, computeOptions) {
@@ -2895,17 +2896,17 @@ function renderGameCard(g, sport, meta) {
       adjustRow.appendChild(adjustBtn);
       adjustRow.appendChild(adjustPanel);
       section.appendChild(adjustRow);
-    } else if (betType === 'spread') {
+    } else if (betType === 'spread' || betType === 'moneyline') {
       // moneyline case — no spread number, so offer odds instead of a line to adjust
       const oddsWrap = el('div');
       oddsWrap.style.cssText = 'margin-top:8px;';
       oddsWrap.appendChild(el('div', null, 'Payout odds for whoever accepts')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:6px;';
       const oddsRow = el('div'); oddsRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
-      const oddsOptions = [['1','Even (1:1)'],['2','2:1'],['3','3:1'],['0.5','1:2'],['0.333333333','1:3']];
+      const oddsOptions = [['3','3:1'],['2','2:1'],['1','Even (1:1)'],['0.5','1:2'],['0.333333333','1:3']];
       oddsOptions.forEach(([val,label], i) => {
         const btn = el('button', null, label);
         btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;';
-        if (i === 0) { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
+        if (val === '1') { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
         btn.onclick = () => {
           oddsMultiplier = parseFloat(val);
           oddsRow.querySelectorAll('button').forEach(b => { b.style.borderColor = 'var(--border)'; b.style.color = 'var(--text-dim)'; });
@@ -2963,7 +2964,7 @@ function renderGameCard(g, sport, meta) {
         poolType: 'challenge', creator: profile.name,
         sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
         betType, sideAbbr: displaySide, units, line, spreadLabel,
-        oddsMultiplier: betType === 'spread' ? oddsMultiplier : 1,
+        oddsMultiplier: (betType === 'spread' || betType === 'moneyline') ? oddsMultiplier : 1,
         visibility: friend ? 'friend' : 'public',
         targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
@@ -3102,7 +3103,8 @@ function renderGameCard(g, sport, meta) {
   const pillRow = el('div', 'league-scroller');
   pillRow.style.cssText = 'padding:10px 0 0;margin:0;';
   const types = [];
-  if (hasSpread) types.push(['spread', spreadPillLabel, !!openSpread]);
+  if (hasSpread) types.push(['spread', 'Spread', !!openSpread]);
+  if (hasMoneyline) types.push(['moneyline', 'Moneyline', !!openMoneyline]);
   if (hasTotal) types.push(['total', 'Total', !!openTotal]);
   if (hasPlayerProp) {
     const hasOpenPlayerProp = allPicks.some(p => p.poolType === 'challenge' && p.propType === 'player' && p.creator === profile.name && p.gameId === g.id && p.status === 'open');
@@ -3119,10 +3121,13 @@ function renderGameCard(g, sport, meta) {
   const sel = challengeTypeSelection[g.id];
   if (sel === 'spread') {
     card.appendChild(renderPoolMarket('spread', hasSpread, (spread !== null) ? Math.abs(spread) : null, (magnitude) => {
-      if (magnitude === null) return [{ side: g.away, team: g.away, label: 'ML' }, { side: g.home, team: g.home, label: 'ML' }];
       const favLabel = magnitude === 0 ? 'PK' : '-' + magnitude;
       const udLabel = magnitude === 0 ? 'PK' : '+' + magnitude;
       return [g.away, g.home].map(ab => ({ side: ab, team: ab, label: ab === favSide ? favLabel : udLabel }));
+    }));
+  } else if (sel === 'moneyline') {
+    card.appendChild(renderPoolMarket('moneyline', hasMoneyline, null, () => {
+      return [{ side: g.away, team: g.away, label: 'ML' }, { side: g.home, team: g.home, label: 'ML' }];
     }));
   } else if (sel === 'total') {
     card.appendChild(renderPoolMarket('total', hasTotal, hasTotal ? totalVal : null, (magnitude) => {
