@@ -2952,11 +2952,11 @@ function renderCompletedChallenges() {
   c1.appendChild(el('div', 'rc-value', String(settledOnes.length)));
   banner.appendChild(c1);
   const c2 = el('div', 'rank-cell');
-  c2.appendChild(el('div', 'rc-label', 'Units won'));
+  c2.appendChild(el('div', 'rc-label', 'Units<br>won'));
   c2.appendChild(el('div', 'rc-value', fmtUnits(unitsWonChallenges))).style.color = unitsWonChallenges >= 0 ? '#4CAF50' : 'var(--danger)';
   banner.appendChild(c2);
   const c3 = el('div', 'rank-cell');
-  c3.appendChild(el('div', 'rc-label', 'Win %'));
+  c3.appendChild(el('div', 'rc-label', 'Win<br>Percentage'));
   c3.appendChild(el('div', 'rc-value', winPct.toFixed(0) + '%'));
   banner.appendChild(c3);
   const c4 = el('div', 'rank-cell');
