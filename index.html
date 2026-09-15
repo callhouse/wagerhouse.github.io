@@ -2159,6 +2159,12 @@ function renderKalshiSection() {
 
 function renderGames() {
   const wrap = el('div');
+  if (!profile.unitSize) {
+    const warn = el('div', 'setup-hint');
+    warn.style.cssText = 'background:var(--surface);border:1px solid var(--danger);border-radius:8px;padding:10px 12px;margin-bottom:10px;color:var(--text);';
+    warn.innerHTML = '\u26a0\ufe0f You need to set a unit size in Profile before you can create or accept challenges.';
+    wrap.appendChild(warn);
+  }
   const scroller = el('div', 'league-scroller');
   LEAGUES_META.forEach(lg => {
     const pill = el('button', 'league-pill' + (lg.id === activeSport ? ' active' : '') + (!lg.active ? ' off' : ''), lg.label);
@@ -2295,7 +2301,7 @@ function renderGolfSection() {
   const visSel = el('select');
   visSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
   const publicOpt = document.createElement('option'); publicOpt.value = ''; publicOpt.textContent = '\ud83d\udce2 Post publicly'; visSel.appendChild(publicOpt);
-  players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
+  players.filter(p => p.trim().toLowerCase() !== profile.name.trim().toLowerCase()).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
   row2.appendChild(visSel);
   slip.appendChild(row2);
 
@@ -2307,6 +2313,7 @@ function renderGolfSection() {
   wrap.appendChild(slip);
 
   createBtn.onclick = async () => {
+    if (!requireUnitSize('create a challenge')) return;
     const units = parseFloat(unitsInput.value);
     errEl.textContent = '';
     if (!selA.value || !selB.value || selA.value === selB.value) { errEl.textContent = 'Pick two different players.'; return; }
@@ -2554,11 +2561,13 @@ async function topUpHouseChallenges() {
 }
 
 async function acceptChallenge(ch) {
+  if (!requireUnitSize('accept a challenge')) return;
   const idx = allPicks.findIndex(p => p.id === ch.id);
   if (idx === -1) return;
   const prev = { ...allPicks[idx] };
   allPicks[idx].status = 'accepted';
   allPicks[idx].acceptedBy = profile.name;
+  allPicks[idx].acceptorUnits = convertedUnitsForViewer(ch);
   try { await savePicks(allPicks); render(); }
   catch (e) { allPicks[idx] = prev; alert("Couldn't accept (" + describeFetchError(e) + ") — try again."); render(); }
 }
@@ -2631,7 +2640,7 @@ function renderSwipeCard(ch) {
   card.appendChild(stampAccept); card.appendChild(stampDecline);
   cardWrap.appendChild(card);
 
-  function doAccept() { swipeCart.push(ch); swipeStack.shift(); recordSwipeCartAdd(ch.id); render(); }
+  function doAccept() { if (!requireUnitSize('accept a challenge')) return; swipeCart.push(ch); swipeStack.shift(); recordSwipeCartAdd(ch.id); render(); }
   function doDecline() { swipeStack.shift(); recordSwipeSkip(ch.id); render(); }
   cardWrap._doAccept = doAccept;
   cardWrap._doDecline = doDecline;
@@ -2766,6 +2775,7 @@ function renderSwipeCart() {
   const confirmBtn = el('button', 'lock-btn', confirmLabel(swipeCart.length, totalCartUnits));
   confirmBtn.style.marginTop = '12px';
   confirmBtn.onclick = async () => {
+    if (!requireUnitSize('accept a challenge')) return;
     confirmBtn.disabled = true; confirmBtn.textContent = 'Saving…';
     const snapshot = swipeCart.slice();
     const snapshotUnits = totalCartUnits;
@@ -2927,6 +2937,11 @@ function displayUnitsFor(ch) {
   if (iAmCreator) return ch.units;
   if (ch.status === 'accepted') return ch.acceptorUnits != null ? ch.acceptorUnits : ch.units;
   return convertedUnitsForViewer(ch); // still open — show what it would actually cost me to accept
+}
+function requireUnitSize(actionLabel) {
+  if (profile.unitSize) return true;
+  alert(`Set a unit size in your Profile before you can ${actionLabel || 'do this'}. This keeps real-money amounts fair between you and whoever you're betting against.`);
+  return false;
 }
 function computeChallengeProfit(ch, iAmCreator) {
   const r = settlePick(ch);
@@ -3160,7 +3175,7 @@ function renderGameCard(g, sport, meta) {
     const visSel = el('select');
     visSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
     const publicOpt = document.createElement('option'); publicOpt.value = ''; publicOpt.textContent = '\ud83d\udce2 Post publicly'; visSel.appendChild(publicOpt);
-    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
+    players.filter(p => p.trim().toLowerCase() !== profile.name.trim().toLowerCase()).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
     row2.appendChild(visSel);
     slip.appendChild(row2);
 
@@ -3172,6 +3187,7 @@ function renderGameCard(g, sport, meta) {
     section.appendChild(slip);
 
     createBtn.onclick = async () => {
+      if (!requireUnitSize('create a challenge')) return;
       const side = selectedSide[key];
       const units = parseFloat(unitsInput.value);
       errEl.textContent = '';
@@ -3286,7 +3302,7 @@ function renderGameCard(g, sport, meta) {
     const visSel2 = el('select');
     visSel2.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
     const publicOpt2 = document.createElement('option'); publicOpt2.value = ''; publicOpt2.textContent = '\ud83d\udce2 Post publicly'; visSel2.appendChild(publicOpt2);
-    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel2.appendChild(o); });
+    players.filter(p => p.trim().toLowerCase() !== profile.name.trim().toLowerCase()).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel2.appendChild(o); });
     row2.appendChild(visSel2);
     slip.appendChild(row2);
 
@@ -3299,6 +3315,7 @@ function renderGameCard(g, sport, meta) {
     section.appendChild(el('div', 'setup-hint', "Player props are new — stat lookups happen automatically once the game is final, but double-check the result once it settles."));
 
     createBtn2.onclick = async () => {
+      if (!requireUnitSize('create a challenge')) return;
       const playerName = nameSel ? nameSel.value : (nameInput ? nameInput.value.trim() : '');
       const line = parseFloat(lineInput.value);
       const units = parseFloat(unitsInput2.value);
