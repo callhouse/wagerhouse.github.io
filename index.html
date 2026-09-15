@@ -3010,11 +3010,11 @@ function renderExistingChallenges() {
   maxUnitsScroller.appendChild(minLabel);
   const minInput = el('input'); minInput.type = 'number'; minInput.min = '0'; minInput.step = '0.5'; minInput.placeholder = 'No min'; minInput.id = 'openChallengeMinUnitsInput';
   minInput.value = openChallengeMinUnits === null ? '' : openChallengeMinUnits;
-  minInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;';
+  minInput.style.cssText = 'flex:0 0 auto;width:45px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 6px;font-size:12px;box-sizing:border-box;';
   const toLabel = el('span', null, 'to'); toLabel.style.cssText = 'font-size:11px;color:var(--text-faint);flex-shrink:0;';
   const maxInput = el('input'); maxInput.type = 'number'; maxInput.min = '0'; maxInput.step = '0.5'; maxInput.placeholder = 'No max'; maxInput.id = 'openChallengeMaxUnitsInput';
   maxInput.value = openChallengeMaxUnits === null ? '' : openChallengeMaxUnits;
-  maxInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;';
+  maxInput.style.cssText = 'flex:0 0 auto;width:45px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 6px;font-size:12px;box-sizing:border-box;';
   minInput.addEventListener('input', () => {
     openChallengeMinUnits = minInput.value === '' ? null : parseFloat(minInput.value);
     swipeStackInitialized = false;
