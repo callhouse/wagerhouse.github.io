@@ -1971,11 +1971,45 @@ function renderExistingChallenges() {
   return wrap;
 }
 
+function myChallengeOutcome(ch) {
+  if (ch.status !== 'accepted') return null;
+  const r = settlePick(ch);
+  if (r.status === 'pending') return null;
+  if (r.status === 'push') return 'push';
+  const iAmCreator = ch.creator === profile.name;
+  if (r.status === 'win') return iAmCreator ? 'win' : 'loss';
+  return iAmCreator ? 'loss' : 'win';
+}
+
 function renderCompletedChallenges() {
   const wrap = el('div');
   const mine = allPicks.filter(p => p.poolType === 'challenge' && (p.creator === profile.name || p.acceptedBy === profile.name || p.targetFriend === profile.name));
   const completed = mine.filter(ch => ch.status === 'declined' || (ch.status === 'accepted' && settlePick(ch).status !== 'pending'));
   completed.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  const settledOnes = completed.map(ch => ({ ch, outcome: myChallengeOutcome(ch) })).filter(x => x.outcome !== null);
+  const wins = settledOnes.filter(x => x.outcome === 'win').length;
+  const losses = settledOnes.filter(x => x.outcome === 'loss').length;
+  const unitsWonChallenges = settledOnes.reduce((s,x) => s + (x.outcome === 'win' ? x.ch.units : x.outcome === 'loss' ? -x.ch.units : 0), 0);
+  const winPct = (wins + losses) > 0 ? (wins / (wins + losses) * 100) : 0;
+
+  if (settledOnes.length) {
+    const banner = el('div', 'rank-banner');
+    const c1 = el('div', 'rank-cell');
+    c1.appendChild(el('div', 'rc-label', 'Total challenges'));
+    c1.appendChild(el('div', 'rc-value', String(settledOnes.length)));
+    banner.appendChild(c1);
+    const c2 = el('div', 'rank-cell');
+    c2.appendChild(el('div', 'rc-label', 'Units won'));
+    c2.appendChild(el('div', 'rc-value', fmtUnits(unitsWonChallenges))).style.color = unitsWonChallenges >= 0 ? '#4CAF50' : 'var(--danger)';
+    banner.appendChild(c2);
+    const c3 = el('div', 'rank-cell');
+    c3.appendChild(el('div', 'rc-label', 'Win %'));
+    c3.appendChild(el('div', 'rc-value', winPct.toFixed(0) + '%'));
+    banner.appendChild(c3);
+    wrap.appendChild(banner);
+  }
+
   wrap.appendChild(el('div', 'week-header', 'Completed challenges'));
   if (!completed.length) { wrap.appendChild(el('div', 'empty', 'No completed challenges yet.')); return wrap; }
   completed.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
