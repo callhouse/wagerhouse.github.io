@@ -16,7 +16,8 @@
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-head); -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; overflow-x: hidden; width: 100%; }
-  body.no-scroll { overflow: hidden; height: 100vh; }
+  html.no-scroll { overflow: hidden; }
+  body.no-scroll { overflow: hidden; position: fixed; top: 0; left: 0; right: 0; height: 100%; width: 100%; }
   #app { min-height: 100vh; padding-bottom: 50px; }
   input, button { font-family: var(--font-head); }
 
@@ -643,6 +644,7 @@ function renderInner() {
   const staleBar = document.getElementById('swipeFixedBar');
   if (staleBar) staleBar.remove();
   document.body.classList.remove('no-scroll');
+  document.documentElement.classList.remove('no-scroll');
   renderMenu();
   renderSectionSwitch();
   const main = document.getElementById('main');
@@ -2425,6 +2427,7 @@ function renderSwipeCard(ch) {
 
 function renderSwipeMode(extraRows) {
   document.body.classList.add('no-scroll');
+  document.documentElement.classList.add('no-scroll');
   const wrap = el('div');
   const headerEl = document.querySelector('header.top');
   const headerHeight = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 110;
@@ -2484,6 +2487,7 @@ function renderSwipeCart() {
     const gTime = gameTimeLabel(ch.gameId);
     if (gTime) left.appendChild(el('div', 'detail', gTime));
     left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u`));
+    left.appendChild(el('div', 'detail', `From ${ch.creator}`));
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
     rmBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:26px;height:26px;font-size:12px;';
@@ -2573,11 +2577,7 @@ function renderExistingChallenges() {
       swipeStackInitialized = true;
     }
     if (challengeBrowseMode === 'cart') {
-      const wrap = el('div');
-      wrap.appendChild(toggle);
-      if (leagueScroller) wrap.appendChild(leagueScroller);
-      wrap.appendChild(renderSwipeCart());
-      return wrap;
+      return renderSwipeCart();
     }
     return renderSwipeMode([toggle, leagueScroller]);
   }
