@@ -562,6 +562,14 @@ async function authSendPasswordReset(email) {
   if (!res.ok) throw new Error((json.error && json.error.message) || 'Could not send reset email');
   return json;
 }
+async function authDeleteAccount(idToken) {
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${firebaseConfig.apiKey}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken })
+  });
+  if (!res.ok) { const json = await res.json().catch(() => ({})); throw new Error((json.error && json.error.message) || 'Could not delete account'); }
+  return true;
+}
 async function authRefresh(refreshToken) {
   const res = await fetch(AUTH_REFRESH_URL, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -613,6 +621,14 @@ async function saveProfileDoc(uid, data) {
   });
   if (!res.ok) { const t = await res.text().catch(()=>''); throw new Error('Firestore PATCH ' + res.status + ': ' + t.slice(0,150)); }
   return res.json();
+}
+async function deleteProfileDoc(uid) {
+  const res = await fetch(`${PROFILES_BASE}/${uid}?key=${firebaseConfig.apiKey}`, {
+    method: 'DELETE',
+    headers: authHeader()
+  });
+  if (!res.ok) { const t = await res.text().catch(()=>''); throw new Error('Firestore DELETE ' + res.status + ': ' + t.slice(0,150)); }
+  return true;
 }
 let allProfilesCache = null;
 async function fetchAllProfiles(forceRefresh) {
@@ -954,42 +970,47 @@ function renderProfileScreen() {
     }
   };
 
-  const cleanupCard = el('div', 'setup-card');
-  cleanupCard.style.marginTop = '14px';
-  cleanupCard.appendChild(el('div', null, 'Clean up an old name')).style.cssText = 'font-size:14px;font-weight:800;margin-bottom:4px;';
-  cleanupCard.appendChild(el('div', 'setup-hint', "If you used this app before creating this account, type the name you typed back then and this will permanently delete everything you made under it — House Bet picks, tracked bets, and challenges you created."));
-  const oldNameInput = el('input'); oldNameInput.placeholder = 'e.g. the name you used before';
-  oldNameInput.style.marginTop = '8px';
-  cleanupCard.appendChild(oldNameInput);
-  const cleanupErr = el('div', 'pick-error');
-  const cleanupBtn = el('button', null, 'Delete everything from that name');
-  cleanupBtn.style.cssText = 'width:100%;margin-top:10px;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:10px;font-size:13px;font-weight:800;';
-  cleanupCard.appendChild(cleanupBtn);
-  cleanupCard.appendChild(cleanupErr);
-  wrap.appendChild(cleanupCard);
+  const dangerCard = el('div', 'setup-card');
+  dangerCard.style.marginTop = '14px';
+  dangerCard.style.borderColor = 'var(--danger)';
+  dangerCard.appendChild(el('div', null, 'Delete My Account')).style.cssText = 'font-size:14px;font-weight:800;margin-bottom:4px;color:var(--danger);';
+  dangerCard.appendChild(el('div', 'setup-hint', `This permanently deletes your login, your profile, and every House Bet pick, tracked bet, and challenge tied to "${profile.name}" \u2014 everywhere this app stores data. It cannot be undone. One thing this can't reach: if other people have added you as a friend, this can't remove you from their friends list, since that lives in their own account.`));
+  dangerCard.appendChild(el('label', null, `Type "${profile.username}" to confirm`)).style.marginTop = '10px';
+  const confirmInput = el('input'); confirmInput.placeholder = profile.username; confirmInput.autocapitalize = 'none';
+  dangerCard.appendChild(confirmInput);
+  const dangerErr = el('div', 'pick-error');
+  const dangerBtn = el('button', null, 'Delete My Account');
+  dangerBtn.style.cssText = 'width:100%;margin-top:10px;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:10px;font-size:13px;font-weight:800;';
+  dangerCard.appendChild(dangerBtn);
+  dangerCard.appendChild(dangerErr);
+  wrap.appendChild(dangerCard);
 
-  cleanupBtn.onclick = async () => {
-    const oldName = oldNameInput.value.trim();
-    cleanupErr.textContent = '';
-    if (!oldName) { cleanupErr.textContent = 'Enter the old name first.'; return; }
-    if (oldName === profile.name) { cleanupErr.textContent = "That's your current name — nothing to clean up."; return; }
-    const matchCount = allPicks.filter(p => p.player === oldName || p.creator === oldName).length;
-    if (!matchCount) { cleanupErr.textContent = `No data found under "${oldName}".`; return; }
-    if (!confirm(`Permanently delete ${matchCount} item${matchCount === 1 ? '' : 's'} made under "${oldName}"? This can't be undone.`)) return;
-    cleanupBtn.disabled = true; cleanupBtn.textContent = 'Deleting…';
-    const before = allPicks;
-    const beforePlayers = players;
-    allPicks = allPicks.filter(p => p.player !== oldName && p.creator !== oldName);
-    players = players.filter(p => p !== oldName);
+  dangerBtn.onclick = async () => {
+    dangerErr.textContent = '';
+    if (confirmInput.value.trim() !== profile.username) { dangerErr.textContent = 'That doesn\'t match your username.'; return; }
+    const matchCount = allPicks.filter(p => p.player === profile.name || p.creator === profile.name || p.acceptedBy === profile.name || p.targetFriend === profile.name).length;
+    if (!confirm(`This will permanently delete your account and ${matchCount} item${matchCount === 1 ? '' : 's'} of data. This cannot be undone. Continue?`)) return;
+    dangerBtn.disabled = true; dangerBtn.textContent = 'Deleting…';
     try {
-      await savePicks(allPicks);
-      await savePlayers(players);
-      cleanupBtn.textContent = 'Deleted \u2713';
-      setTimeout(() => { cleanupBtn.disabled = false; cleanupBtn.textContent = 'Delete everything from that name'; oldNameInput.value = ''; render(); }, 1200);
+      await ensureFreshSession();
+      const myUid = profile.uid;
+      const myName = profile.name;
+      const remainingPicks = allPicks.filter(p => p.player !== myName && p.creator !== myName && p.acceptedBy !== myName && p.targetFriend !== myName);
+      const remainingPlayers = players.filter(p => p !== myName);
+      await savePicks(remainingPicks);
+      await savePlayers(remainingPlayers);
+      await deleteProfileDoc(myUid);
+      await authDeleteAccount(session.idToken);
+      clearSession();
+      profile = null;
+      try { localStorage.removeItem('ww_profile'); } catch (e) {}
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+      appSection = 'daily'; activeTab = 'games'; authMode = 'login';
+      render();
     } catch (e) {
-      allPicks = before; players = beforePlayers;
-      cleanupErr.textContent = "Couldn't delete (" + describeFetchError(e) + ") — try again.";
-      cleanupBtn.disabled = false; cleanupBtn.textContent = 'Delete everything from that name';
+      dangerErr.textContent = "Couldn't finish deleting (" + describeFetchError(e) + ") — some data may have been removed. Try again, or check with whoever manages this app.";
+      dangerBtn.disabled = false; dangerBtn.textContent = 'Delete My Account';
     }
   };
 
@@ -3542,7 +3563,7 @@ function renderGameCard(g, sport, meta) {
   const hasSpread = !moneylineOnly && spread !== null;
   const hasMoneyline = true; // always available independent of whether a spread is posted — same as a real sportsbook
   const hasTotal = !moneylineOnly && totalVal !== null && totalVal !== undefined;
-  const hasPlayerProp = sport === 'nfl';
+  const hasPlayerProp = sport === 'nfl' || sport === 'mlb';
   const openSpread = myChallengeFor(g.id, 'spread');
   const openTotal = myChallengeFor(g.id, 'total');
   const openMoneyline = myChallengeFor(g.id, 'moneyline');
@@ -3728,14 +3749,17 @@ function renderGameCard(g, sport, meta) {
 
   function renderPlayerPropPanel() {
     const section = el('div');
-    const awayRoster = teamRosterCache[(g.away || '').toLowerCase()];
-    const homeRoster = teamRosterCache[(g.home || '').toLowerCase()];
+    const rosterKeyAway = sport + ':' + (g.away || '').toLowerCase();
+    const rosterKeyHome = sport + ':' + (g.home || '').toLowerCase();
+    const awayRoster = teamRosterCache[rosterKeyAway];
+    const homeRoster = teamRosterCache[rosterKeyHome];
     const bothChecked = awayRoster !== undefined && homeRoster !== undefined;
+    const posOrder = sport === 'mlb' ? ['SP','RP','P','C','1B','2B','3B','SS','LF','CF','RF','OF','DH'] : ['QB','RB','WR','TE','FB'];
 
     let nameInput = null, nameSel = null;
     if (!bothChecked) {
       section.appendChild(el('div', 'empty', 'Loading players…')).style.cssText = 'padding:10px 0;font-size:12px;';
-      Promise.all([fetchTeamRoster(g.away), fetchTeamRoster(g.home)]).then(() => render());
+      Promise.all([fetchTeamRoster(g.away, sport), fetchTeamRoster(g.home, sport)]).then(() => render());
     } else if ((awayRoster && awayRoster.length) || (homeRoster && homeRoster.length)) {
       nameSel = el('select');
       nameSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin-top:8px;box-sizing:border-box;';
@@ -3743,7 +3767,6 @@ function renderGameCard(g, sport, meta) {
       [[g.away, awayRoster], [g.home, homeRoster]].forEach(([abbr, roster]) => {
         if (!roster || !roster.length) return;
         const grp = document.createElement('optgroup'); grp.label = abbr;
-        const posOrder = ['QB','RB','WR','TE','FB'];
         const sortedRoster = roster.slice().sort((a,b) => {
           const posDiff = posOrder.indexOf(a.position) - posOrder.indexOf(b.position);
           if (posDiff !== 0) return posDiff;
@@ -3755,7 +3778,7 @@ function renderGameCard(g, sport, meta) {
       section.appendChild(nameSel);
     } else {
       section.appendChild(el('div', 'setup-hint', "Couldn't load rosters for this game — type the player's name instead."));
-      nameInput = el('input'); nameInput.placeholder = "Player name (e.g. Jalen Hurts)";
+      nameInput = el('input'); nameInput.placeholder = sport === 'mlb' ? "Player name (e.g. Gerrit Cole)" : "Player name (e.g. Jalen Hurts)";
       nameInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin-top:8px;box-sizing:border-box;';
       section.appendChild(nameInput);
     }
@@ -3763,7 +3786,7 @@ function renderGameCard(g, sport, meta) {
     const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1.4fr 1fr;gap:8px;margin-top:8px;';
     const catSel = el('select');
     catSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
-    PLAYER_PROP_CATEGORIES.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.label; catSel.appendChild(o); });
+    PLAYER_PROP_CATEGORIES.filter(c => c.sport === sport).forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.label; catSel.appendChild(o); });
     row.appendChild(catSel);
     const lineInput = el('input'); lineInput.type = 'number'; lineInput.step = '0.5'; lineInput.placeholder = 'Line';
     lineInput.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
@@ -3942,19 +3965,27 @@ function potentialWin(p) { return p.units; }
 // NOTE: built from ESPN's commonly-documented summary?event= box score shape (boxscore.players[].statistics[].athletes[]),
 // but not verified against a live response in this session — test after deploying and report back if stats don't match.
 const PLAYER_PROP_CATEGORIES = [
-  { id: 'passingYards', label: 'Passing Yards' },
-  { id: 'rushingYards', label: 'Rushing Yards' },
-  { id: 'receptions', label: 'Receptions' },
-  { id: 'receivingYards', label: 'Receiving Yards' },
-  { id: 'touchdowns', label: 'Touchdowns (Any)' },
+  { id: 'passingYards', label: 'Passing Yards', sport: 'nfl' },
+  { id: 'rushingYards', label: 'Rushing Yards', sport: 'nfl' },
+  { id: 'receptions', label: 'Receptions', sport: 'nfl' },
+  { id: 'receivingYards', label: 'Receiving Yards', sport: 'nfl' },
+  { id: 'touchdowns', label: 'Touchdowns (Any)', sport: 'nfl' },
+  { id: 'pitcherStrikeouts', label: 'Pitcher Strikeouts', sport: 'mlb' },
+  { id: 'hitterHomeRuns', label: 'Home Runs', sport: 'mlb' },
+  { id: 'hitterHits', label: 'Hits', sport: 'mlb' },
 ];
 const PROP_RELEVANT_POSITIONS = new Set(['QB','RB','WR','TE','FB']);
-let teamRosterCache = {}; // teamAbbr(lowercase) -> [{id, name, position}] | null
-async function fetchTeamRoster(teamAbbr) {
-  const key = (teamAbbr || '').toLowerCase();
+const PROP_RELEVANT_POSITIONS_MLB = new Set(['SP','RP','P','C','1B','2B','3B','SS','OF','DH','LF','CF','RF']);
+let teamRosterCache = {}; // 'sport:teamAbbr'(lowercase) -> [{id, name, position}] | null
+async function fetchTeamRoster(teamAbbr, sport) {
+  sport = sport || 'nfl';
+  const key = sport + ':' + (teamAbbr || '').toLowerCase();
   if (teamRosterCache[key] !== undefined) return teamRosterCache[key];
+  const espnSport = sport === 'mlb' ? 'baseball' : 'football';
+  const espnLeague = sport === 'mlb' ? 'mlb' : 'nfl';
+  const posSet = sport === 'mlb' ? PROP_RELEVANT_POSITIONS_MLB : PROP_RELEVANT_POSITIONS;
   try {
-    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${key}/roster`);
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${espnLeague}/teams/${(teamAbbr||'').toLowerCase()}/roster`);
     if (!res.ok) { teamRosterCache[key] = null; return null; }
     const json = await res.json();
     const groups = json.athletes || [];
@@ -3962,7 +3993,7 @@ async function fetchTeamRoster(teamAbbr) {
     groups.forEach(grp => {
       (grp.items || []).forEach(a => {
         const pos = (a.position && (a.position.abbreviation || a.position.name)) || '';
-        if (!PROP_RELEVANT_POSITIONS.has(pos)) return;
+        if (!posSet.has(pos)) return;
         players.push({ id: a.id, name: a.displayName || a.fullName, position: pos });
       });
     });
@@ -3970,7 +4001,7 @@ async function fetchTeamRoster(teamAbbr) {
     return players;
   } catch (e) { teamRosterCache[key] = null; return null; }
 }
-let boxScoreCache = {}; // gameId -> {normalizedName: {displayName, passingYards, rushingYards, receptions, receivingYards, passingTouchdowns, rushingTouchdowns, receivingTouchdowns}} | null
+let boxScoreCache = {}; // gameId -> {normalizedName: {displayName, passingYards, rushingYards, receptions, receivingYards, passingTouchdowns, rushingTouchdowns, receivingTouchdowns, strikeouts, homeRuns, hits}} | null
 async function fetchPlayerBoxScore(sport, gameId) {
   if (boxScoreCache[gameId] !== undefined) return boxScoreCache[gameId];
   const paths = ESPN_PATHS[sport];
@@ -3988,7 +4019,7 @@ async function fetchPlayerBoxScore(sport, gameId) {
           const name = a.athlete && a.athlete.displayName;
           if (!name) return;
           const norm = name.toLowerCase().trim();
-          if (!players[norm]) players[norm] = { displayName: name, passingYards: null, rushingYards: null, receptions: null, receivingYards: null, passingTouchdowns: null, rushingTouchdowns: null, receivingTouchdowns: null };
+          if (!players[norm]) players[norm] = { displayName: name, passingYards: null, rushingYards: null, receptions: null, receivingYards: null, passingTouchdowns: null, rushingTouchdowns: null, receivingTouchdowns: null, strikeouts: null, homeRuns: null, hits: null };
           const statVals = a.stats || [];
           keys.forEach((k, i) => {
             const kl = (k || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -4002,6 +4033,9 @@ async function fetchPlayerBoxScore(sport, gameId) {
             else if (kl.includes('passingtouchdowns')) players[norm].passingTouchdowns = v;
             else if (kl.includes('rushingtouchdowns')) players[norm].rushingTouchdowns = v;
             else if (kl.includes('receivingtouchdowns')) players[norm].receivingTouchdowns = v;
+            else if (kl === 'strikeouts' || kl === 'k') players[norm].strikeouts = v;
+            else if (kl.includes('homerun')) players[norm].homeRuns = v;
+            else if (kl === 'hits' || kl === 'h') players[norm].hits = v;
           });
         });
       });
@@ -4017,6 +4051,9 @@ function statValueFor(playerStats, category) {
     if (parts.every(x => x === null)) return null;
     return parts.reduce((s,x) => s + (x || 0), 0);
   }
+  if (category === 'pitcherStrikeouts') return playerStats.strikeouts;
+  if (category === 'hitterHomeRuns') return playerStats.homeRuns;
+  if (category === 'hitterHits') return playerStats.hits;
   return playerStats[category];
 }
 function findPlayerInBoxScore(box, typedName) {
