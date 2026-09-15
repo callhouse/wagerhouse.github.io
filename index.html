@@ -1957,8 +1957,9 @@ function renderGameCard(g, sport, meta) {
 
   const spread = computeSpread(sport, g);
   const totalVal = g.overUnder;
+  const favSide = spread !== null ? (spread <= 0 ? g.home : g.away) : null;
 
-  function renderPoolMarket(label, betType, hasMarket, sideOptions) {
+  function renderPoolMarket(label, betType, hasMarket, defaultMagnitude, computeOptions) {
     const section = el('div');
     section.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border);';
     section.appendChild(el('div', null, label)).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;font-weight:700;margin-bottom:6px;';
@@ -1974,20 +1975,47 @@ function renderGameCard(g, sport, meta) {
       return section;
     }
 
+    let magnitude = defaultMagnitude;
     const key = g.id + '_' + betType;
     const grid = el('div', 'outcome-grid');
-    sideOptions.forEach(opt => {
-      const btn = el('div', 'outcome-btn' + (selectedSide[key] === opt.side ? ' selected' : ''));
-      btn.innerHTML = `<div class="oc-team">${opt.team}</div><div class="oc-line">${opt.label}</div>`;
-      btn.onclick = () => {
-        selectedSide[key] = opt.side;
-        grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        createBtn.disabled = false;
-      };
-      grid.appendChild(btn);
-    });
     section.appendChild(grid);
+
+    function rebuildGrid() {
+      grid.innerHTML = '';
+      computeOptions(magnitude).forEach(opt => {
+        const btn = el('div', 'outcome-btn' + (selectedSide[key] === opt.side ? ' selected' : ''));
+        btn.innerHTML = `<div class="oc-team">${opt.team}</div><div class="oc-line">${opt.label}</div>`;
+        btn.onclick = () => {
+          selectedSide[key] = opt.side;
+          grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          createBtn.disabled = false;
+        };
+        grid.appendChild(btn);
+      });
+    }
+
+    const adjustBtn = el('button', null, `\u270f\ufe0f Adjust ${betType === 'total' ? 'Total' : 'Line'}`);
+    adjustBtn.style.cssText = 'width:100%;margin-top:8px;background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:8px;font-size:12px;font-weight:700;';
+    const adjustPanel = el('div');
+    adjustPanel.style.cssText = 'display:none;margin-top:8px;gap:8px;align-items:center;';
+    const adjustInput = el('input'); adjustInput.type = 'number'; adjustInput.step = '0.5'; adjustInput.value = magnitude !== null ? magnitude : '';
+    adjustInput.style.cssText = 'flex:1;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;';
+    const applyBtn = el('button', null, 'Apply');
+    applyBtn.style.cssText = 'background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:8px 14px;font-size:12px;font-weight:700;';
+    adjustPanel.appendChild(adjustInput); adjustPanel.appendChild(applyBtn);
+    adjustBtn.onclick = () => { adjustPanel.style.display = adjustPanel.style.display === 'none' ? 'flex' : 'none'; };
+    applyBtn.onclick = () => {
+      const val = parseFloat(adjustInput.value);
+      if (isNaN(val) || val < 0) return;
+      magnitude = val;
+      rebuildGrid();
+    };
+    if (defaultMagnitude !== null) {
+      section.appendChild(adjustBtn);
+      section.appendChild(adjustPanel);
+    }
+    rebuildGrid();
 
     const slip = el('div', 'bet-slip');
     const bsRow = el('div', 'bs-row');
@@ -2016,13 +2044,20 @@ function renderGameCard(g, sport, meta) {
       if (!side) { errEl.textContent = 'Pick a side first.'; return; }
       if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
       const friend = visSel.value || null;
+      let line, spreadLabel;
+      if (betType === 'total') {
+        line = magnitude;
+        spreadLabel = null;
+      } else {
+        const isFav = side === favSide;
+        spreadLabel = magnitude === 0 ? 'PK' : (isFav ? '-' + magnitude : '+' + magnitude);
+        line = magnitude === 0 ? 0 : (isFav ? -magnitude : magnitude);
+      }
       const challenge = {
         id: profile.name + '_challenge_' + g.id + '_' + betType + '_' + Date.now(),
         poolType: 'challenge', creator: profile.name,
         sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
-        betType, sideAbbr: side, units,
-        line: betType === 'total' ? totalVal : (side === g.home ? spread : -spread),
-        spreadLabel: betType === 'spread' ? spreadLabelForSide(sport, g, side) : null,
+        betType, sideAbbr: side, units, line, spreadLabel,
         visibility: friend ? 'friend' : 'public',
         targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
@@ -2049,14 +2084,16 @@ function renderGameCard(g, sport, meta) {
     return section;
   }
 
-  card.appendChild(renderPoolMarket('Spread', 'spread', spread !== null, [
-    { side: g.away, team: g.away, label: spread === null ? 'ML' : (-spread === 0 ? 'PK' : (-spread > 0 ? '+' + (-spread) : (-spread).toString())) },
-    { side: g.home, team: g.home, label: spread === null ? 'ML' : (spread === 0 ? 'PK' : (spread > 0 ? '+' + spread : spread.toString())) },
-  ]));
-  card.appendChild(renderPoolMarket('Total', 'total', totalVal !== null && totalVal !== undefined, [
-    { side: 'OVER', team: 'Over', label: totalVal !== null && totalVal !== undefined ? String(totalVal) : '—' },
-    { side: 'UNDER', team: 'Under', label: totalVal !== null && totalVal !== undefined ? String(totalVal) : '—' },
-  ]));
+  card.appendChild(renderPoolMarket('Spread', 'spread', spread !== null, spread !== null ? Math.abs(spread) : null, (magnitude) => {
+    if (magnitude === null) return [{ side: g.away, team: g.away, label: 'ML' }, { side: g.home, team: g.home, label: 'ML' }];
+    const favLabel = magnitude === 0 ? 'PK' : '-' + magnitude;
+    const udLabel = magnitude === 0 ? 'PK' : '+' + magnitude;
+    return [g.away, g.home].map(ab => ({ side: ab, team: ab, label: ab === favSide ? favLabel : udLabel }));
+  }));
+  card.appendChild(renderPoolMarket('Total', 'total', totalVal !== null && totalVal !== undefined, totalVal !== null && totalVal !== undefined ? totalVal : null, (magnitude) => {
+    if (magnitude === null) return [{ side: 'OVER', team: 'Over', label: '—' }, { side: 'UNDER', team: 'Under', label: '—' }];
+    return [{ side: 'OVER', team: 'Over', label: String(magnitude) }, { side: 'UNDER', team: 'Under', label: String(magnitude) }];
+  }));
   return card;
 }
 
