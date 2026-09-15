@@ -306,6 +306,7 @@ let allPicks = [];
 let players = [];
 let activeTab = 'games';
 let activeSport = 'nfl';
+let gamesDateFilter = 'week'; // 'today' | 'week'
 let selectedSide = {};
 let picksLeagueFilter = null; // null = show all leagues; else a single sport id
 let picksSortMode = 'date_desc';
@@ -2006,15 +2007,33 @@ function renderGames() {
     return wrap;
   }
 
-  const games = (DATA[activeSport] || []).filter(g => g.status === 'scheduled');
+  const dateScroller = el('div', 'league-scroller');
+  [['today','Today'],['week','This Week']].forEach(([id,label]) => {
+    const pill = el('button', 'league-pill' + (gamesDateFilter === id ? ' active' : ''), label);
+    pill.onclick = () => { gamesDateFilter = id; render(); };
+    dateScroller.appendChild(pill);
+  });
+  wrap.appendChild(dateScroller);
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const games = (DATA[activeSport] || []).filter(g => {
+    if (g.status !== 'scheduled') return false;
+    const gd = new Date(g.start);
+    if (gamesDateFilter === 'today') {
+      return gd.getFullYear() === now.getFullYear() && gd.getMonth() === now.getMonth() && gd.getDate() === now.getDate();
+    }
+    const weekEnd = new Date(startOfToday); weekEnd.setDate(weekEnd.getDate() + 7);
+    return gd >= startOfToday && gd < weekEnd;
+  });
   const list = el('div');
   if (!games.length) {
-    list.appendChild(el('div', 'empty', gamesLoaded ? ('No upcoming ' + meta.label + ' games found for today/tomorrow.') : 'Loading games…'));
+    list.appendChild(el('div', 'empty', gamesLoaded ? ('No upcoming ' + meta.label + ' games in this range.') : 'Loading games…'));
   } else {
     games.slice().sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(g => list.appendChild(renderGameCard(g, activeSport, meta)));
   }
   wrap.appendChild(list);
-  wrap.appendChild(el('div', 'refresh-note', 'Only games that haven\'t started yet are shown here. Spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard. Some smaller matchups won\'t have a posted spread — those show moneyline only.'));
+  wrap.appendChild(el('div', 'refresh-note', 'Only games that haven\'t started yet are shown here, pulled from a rolling 7-day window. Spreads (where a book has posted one) are pulled live from ESPN\'s public scoreboard. Some smaller matchups won\'t have a posted spread — those show moneyline only.'));
   return wrap;
 }
 
