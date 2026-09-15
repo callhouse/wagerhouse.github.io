@@ -31,10 +31,10 @@
   .menu-dropdown .menu-item:last-child { border-bottom: none; }
   .menu-dropdown .menu-item.danger { color: var(--danger); }
   .menu-dropdown .menu-item .sub { display: block; font-size: 11px; color: var(--text-faint); font-weight: 500; margin-top: 2px; }
-  .swipe-card-big { min-height: calc(100vh - 330px); display: flex; flex-direction: column; justify-content: space-between; }
-  .swipe-team-logo { width: 56px; height: 56px; object-fit: contain; }
-  .swipe-fixed-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 25; }
-  .swipe-bar-spacer { height: 78px; }
+  .swipe-card-big { display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; max-width: 100%; box-sizing: border-box; }
+  .swipe-team-logo { width: 48px; height: 48px; object-fit: contain; }
+  .swipe-fixed-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 25; box-sizing: border-box; }
+  .swipe-bar-spacer { height: 84px; }
 
   .tabbar { display: flex; gap: 4px; }
   .tab { flex: 1; text-align: center; padding: 10px 4px; font-size: 12px; font-weight: 700; color: var(--text-faint); border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.02em; }
@@ -44,6 +44,8 @@
   .league-scroller::-webkit-scrollbar { display: none; }
   .league-pill { flex: 0 0 auto; padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); font-size: 11px; font-weight: 700; white-space: nowrap; text-transform: uppercase; }
   .league-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .league-pill.offered { border-color: #4CAF50; color: #4CAF50; }
+  .league-pill.offered.active { background: #4CAF50; border-color: #4CAF50; color: #0a1f0c; }
   .league-pill.off { opacity: 0.5; }
 
   main { padding: 4px 16px 8px; }
@@ -52,7 +54,7 @@
   .offseason-card .big { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
   .offseason-card .small { font-size: 12.5px; }
 
-  .event-card { background: var(--surface); border-radius: 10px; padding: 12px; margin-top: 10px; border: 1px solid var(--border); }
+  .event-card { background: var(--surface); border-radius: 10px; padding: 12px; margin-top: 10px; border: 1px solid var(--border); box-sizing: border-box; max-width: 100%; }
   .event-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .event-meta { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
   .event-meta.live { color: var(--danger); font-weight: 700; }
@@ -160,12 +162,16 @@ const LEAGUES_META = [
   { id: 'nfl', label: 'NFL', active: true, spreadSport: true },
   { id: 'mlb', label: 'MLB', active: true, spreadSport: false },
   { id: 'ncaaf', label: 'NCAAF', active: true, spreadSport: true },
+  { id: 'wnba', label: 'WNBA', active: true, spreadSport: true },
+  { id: 'atp', label: "Men's Tennis", active: true, spreadSport: false, moneylineOnly: true },
+  { id: 'wta', label: "Women's Tennis", active: true, spreadSport: false, moneylineOnly: true },
   { id: 'nba', label: 'NBA', active: false, returns: 'Oct 20, 2026' },
   { id: 'nhl', label: 'NHL', active: false, returns: 'Sep 29, 2026' },
   { id: 'ncaab', label: 'NCAAB', active: false, returns: 'early Nov 2026' },
+  { id: 'pga', label: 'PGA Golf', active: true, isGolf: true },
 ];
 
-let DATA = { nfl: [], mlb: [], ncaaf: [] };
+let DATA = { nfl: [], mlb: [], ncaaf: [], wnba: [], atp: [], wta: [] };
 const gameIndex = {};
 function rebuildGameIndex() {
   Object.keys(gameIndex).forEach(k => delete gameIndex[k]);
@@ -177,6 +183,9 @@ const ESPN_PATHS = {
   nfl: { sport: 'football', league: 'nfl' },
   mlb: { sport: 'baseball', league: 'mlb' },
   ncaaf: { sport: 'football', league: 'college-football' },
+  wnba: { sport: 'basketball', league: 'wnba' },
+  atp: { sport: 'tennis', league: 'atp' },
+  wta: { sport: 'tennis', league: 'wta' },
   nba: { sport: 'basketball', league: 'nba' },
   nhl: { sport: 'hockey', league: 'nhl' },
   ncaab: { sport: 'basketball', league: 'mens-college-basketball' },
@@ -202,11 +211,20 @@ async function fetchSportGames(sport) {
   results.flat().forEach(ev => { if (!seen.has(ev.id)) { seen.add(ev.id); events.push(ev); } });
   return events.map(ev => {
     const comp = ev.competitions && ev.competitions[0];
-    if (!comp) return null;
-    const home = comp.competitors && comp.competitors.find(c => c.homeAway === 'home');
-    const away = comp.competitors && comp.competitors.find(c => c.homeAway === 'away');
-    if (!home || !away || !home.team || !away.team) return null;
-    const homeAbbr = home.team.abbreviation, awayAbbr = away.team.abbreviation;
+    if (!comp || !comp.competitors) return null;
+    let home = comp.competitors.find(c => c.homeAway === 'home');
+    let away = comp.competitors.find(c => c.homeAway === 'away');
+    if (!home || !away) { home = comp.competitors[0]; away = comp.competitors[1]; }
+    if (!home || !away) return null;
+    const homeEntity = home.team || home.athlete;
+    const awayEntity = away.team || away.athlete;
+    if (!homeEntity || !awayEntity) return null;
+    const homeAbbr = home.team ? home.team.abbreviation : ('p' + homeEntity.id);
+    const awayAbbr = away.team ? away.team.abbreviation : ('p' + awayEntity.id);
+    const homeName = home.team ? home.team.displayName : homeEntity.displayName;
+    const awayName = away.team ? away.team.displayName : awayEntity.displayName;
+    const homeLogo = home.team ? (home.team.logo || null) : ((homeEntity.headshot && homeEntity.headshot.href) || null);
+    const awayLogo = away.team ? (away.team.logo || null) : ((awayEntity.headshot && awayEntity.headshot.href) || null);
     const state = ev.status && ev.status.type && ev.status.type.state;
     const status = state === 'post' ? 'closed' : (state === 'in' ? 'inprogress' : 'scheduled');
     const odds = comp.odds && comp.odds[0];
@@ -222,7 +240,7 @@ async function fetchSportGames(sport) {
       id: ev.id,
       status,
       home: homeAbbr, away: awayAbbr,
-      teams: { [homeAbbr]: { name: home.team.displayName, logo: home.team.logo || null }, [awayAbbr]: { name: away.team.displayName, logo: away.team.logo || null } },
+      teams: { [homeAbbr]: { name: homeName, logo: homeLogo }, [awayAbbr]: { name: awayName, logo: awayLogo } },
       start: ev.date,
       local_start: new Date(ev.date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
       title: (comp.notes && comp.notes[0] && comp.notes[0].headline) || null,
@@ -258,7 +276,7 @@ async function refreshGameLists() {
 
 let liveTimer = null;
 function startLiveScoreChecks() {
-  refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); await persistNewlySettledPlayerProps(); if (profile) render(); });
+  refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); await persistNewlySettledPlayerProps(); await persistNewlySettledGolfH2H(); if (profile) render(); });
   if (liveTimer) return;
   liveTimer = setInterval(async () => {
     if (pendingSaveCount > 0) return; // don't rebuild the screen while a bet is mid-save
@@ -266,7 +284,8 @@ function startLiveScoreChecks() {
     const settledA = await persistNewlySettledPicks();
     const settledB = await persistNewlySettledWeeklyBets();
     const settledC = await persistNewlySettledPlayerProps();
-    if (profile && (dataChanged || settledA || settledB || settledC)) render();
+    const settledD = await persistNewlySettledGolfH2H();
+    if (profile && (dataChanged || settledA || settledB || settledC || settledD)) render();
   }, 60000);
 }
 
@@ -308,6 +327,7 @@ let menuOpen = false;
 let activeChallengesOpen = true;
 let completedChallengesOpen = true;
 let acceptedChallengeLeague = null; // sport id or null
+let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 
@@ -1964,6 +1984,10 @@ function renderGames() {
     wrap.appendChild(card);
     return wrap;
   }
+  if (meta.isGolf) {
+    wrap.appendChild(renderGolfSection());
+    return wrap;
+  }
 
   const games = (DATA[activeSport] || []).filter(g => g.status === 'scheduled');
   const list = el('div');
@@ -1977,8 +2001,112 @@ function renderGames() {
   return wrap;
 }
 
+function renderGolfSection() {
+  const wrap = el('div');
+  wrap.appendChild(el('div', 'setup-hint', "Golf challenges are head-to-head: pick two players from the current tournament field, and whoever posts the lower score when the tournament finishes wins. Beta — double-check results once they settle."));
+
+  if (!golfFieldCache) {
+    if (!golfFieldAttempted) {
+      wrap.appendChild(el('div', 'empty', 'Loading tournament field…'));
+      fetchGolfField(false).then(() => render());
+      return wrap;
+    }
+    wrap.appendChild(el('div', 'empty', 'No active PGA tournament field found right now — check back closer to a tournament.'));
+    return wrap;
+  }
+  const field = golfFieldCache;
+  if (!field || !field.players.length) {
+    wrap.appendChild(el('div', 'empty', 'No active PGA tournament field found right now — check back closer to a tournament.'));
+    return wrap;
+  }
+
+  wrap.appendChild(el('div', 'week-header', field.tournamentName));
+
+  const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;';
+  const selA = el('select'); const selB = el('select');
+  [selA, selB].forEach(sel => {
+    sel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:12px;min-width:0;box-sizing:border-box;';
+    const blank = document.createElement('option'); blank.value = ''; blank.textContent = 'Select player…'; sel.appendChild(blank);
+    field.players.slice().sort((a,b) => a.name.localeCompare(b.name)).forEach(p => { const o = document.createElement('option'); o.value = p.name; o.textContent = p.name; sel.appendChild(o); });
+  });
+  row.appendChild(selA); row.appendChild(selB);
+  wrap.appendChild(row);
+
+  const sideGrid = el('div', 'outcome-grid');
+  sideGrid.style.marginTop = '8px';
+  let chosenPlayer = null;
+  function rebuildSideGrid() {
+    sideGrid.innerHTML = '';
+    if (!selA.value || !selB.value || selA.value === selB.value) return;
+    [selA.value, selB.value].forEach(name => {
+      const btn = el('div', 'outcome-btn' + (chosenPlayer === name ? ' selected' : ''));
+      btn.innerHTML = `<div class="oc-team">${name}</div><div class="oc-line">to win</div>`;
+      btn.onclick = () => {
+        chosenPlayer = name;
+        sideGrid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        createBtn.disabled = false;
+      };
+      sideGrid.appendChild(btn);
+    });
+  }
+  selA.onchange = () => { chosenPlayer = null; createBtn.disabled = true; rebuildSideGrid(); };
+  selB.onchange = () => { chosenPlayer = null; createBtn.disabled = true; rebuildSideGrid(); };
+  wrap.appendChild(sideGrid);
+
+  const slip = el('div', 'bet-slip');
+  const row2 = el('div'); row2.style.cssText = 'display:grid;grid-template-columns:0.8fr 1.4fr;gap:8px;';
+  const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = '1'; unitsInput.placeholder = 'Units';
+  unitsInput.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px;font-family:var(--font-mono);font-size:13px;min-width:0;box-sizing:border-box;';
+  row2.appendChild(unitsInput);
+  const visSel = el('select');
+  visSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
+  const publicOpt = document.createElement('option'); publicOpt.value = ''; publicOpt.textContent = '\ud83d\udce2 Post publicly'; visSel.appendChild(publicOpt);
+  players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
+  row2.appendChild(visSel);
+  slip.appendChild(row2);
+
+  const createBtn = el('button', 'lock-btn', 'Pick two players first');
+  createBtn.disabled = true;
+  slip.appendChild(createBtn);
+  const errEl = el('div', 'pick-error');
+  slip.appendChild(errEl);
+  wrap.appendChild(slip);
+
+  createBtn.onclick = async () => {
+    const units = parseFloat(unitsInput.value);
+    errEl.textContent = '';
+    if (!selA.value || !selB.value || selA.value === selB.value) { errEl.textContent = 'Pick two different players.'; return; }
+    if (!chosenPlayer) { errEl.textContent = 'Pick who you think wins.'; return; }
+    if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
+    const displaySide = chosenPlayer === selA.value ? selB.value : selA.value; // acceptor gets the opposite pick
+    const friend = visSel.value || null;
+    const challenge = {
+      id: profile.name + '_challenge_golf_' + field.tournamentId + '_' + Date.now(),
+      poolType: 'challenge', propType: 'golf_h2h', creator: profile.name,
+      sport: 'pga', gameLabel: field.tournamentName, tournamentId: field.tournamentId,
+      playerA: selA.value, playerB: selB.value, sideAbbr: displaySide, units,
+      visibility: friend ? 'friend' : 'public',
+      targetFriend: friend, status: 'open', acceptedBy: null,
+      timestamp: new Date().toISOString()
+    };
+    createBtn.disabled = true; createBtn.textContent = 'Saving…';
+    allPicks.push(challenge);
+    try {
+      await savePicks(allPicks);
+      render();
+    } catch (e) {
+      allPicks.pop();
+      createBtn.disabled = false; createBtn.textContent = friend ? 'Send to ' + friend : 'Post publicly';
+      errEl.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
+    }
+  };
+  visSel.onchange = () => { createBtn.textContent = visSel.value ? 'Send to ' + visSel.value : 'Post publicly'; };
+  return wrap;
+}
+
 function myChallengeFor(gameId, betType) {
-  return allPicks.find(p => p.poolType === 'challenge' && p.creator === profile.name && p.gameId === gameId && p.betType === betType && p.status !== 'declined');
+  return allPicks.find(p => p.poolType === 'challenge' && p.creator === profile.name && p.gameId === gameId && p.betType === betType && p.status === 'open');
 }
 function challengeStatusText(ch) {
   if (ch.status === 'open') return ch.visibility === 'public' ? 'Posted publicly — waiting for someone to accept' : `Sent to ${ch.targetFriend} — waiting for them to accept`;
@@ -2017,6 +2145,10 @@ function challengeMarketTxt(ch) {
   if (ch.propType === 'player') {
     const catLabel = (PLAYER_PROP_CATEGORIES.find(c => c.id === ch.statCategory) || {}).label || ch.statCategory;
     return `${ch.playerName} ${(ch.sideAbbr === 'OVER' ? 'Over' : 'Under')} ${ch.line} ${catLabel}`;
+  }
+  if (ch.propType === 'golf_h2h') {
+    const opp = ch.sideAbbr === ch.playerA ? ch.playerB : ch.playerA;
+    return `${ch.sideAbbr} to beat ${opp} (H2H)`;
   }
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   if (ch.betType === 'total') return (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line;
@@ -2066,6 +2198,12 @@ function renderChallengeRow(ch) {
     let txt, color;
     if (myOutcome === 'pending' && ch.propType === 'player' && ch.playerNotFound) {
       txt = `Couldn't find "${ch.playerName}" in the final box score — may need manual review`;
+      color = 'var(--gold)';
+    } else if (myOutcome === 'pending' && ch.propType === 'golf_h2h' && ch.playerNotFound) {
+      txt = `Couldn't match ${ch.playerA} / ${ch.playerB} in the final leaderboard — may need manual review`;
+      color = 'var(--gold)';
+    } else if (myOutcome === 'pending' && ch.propType === 'golf_h2h') {
+      txt = `Waiting on ${ch.gameLabel} to finish`;
       color = 'var(--gold)';
     } else if (myOutcome === 'pending') { txt = `Accepted by ${ch.acceptedBy} — game not final yet`; color = 'var(--gold)'; }
     else if (myOutcome === 'push') { txt = 'Pushed — no units changed hands'; color = 'var(--gold)'; }
@@ -2202,12 +2340,12 @@ function renderSwipeCard(ch) {
   const logoRow = el('div');
   logoRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:20px;margin:24px 0;';
   if (awayLogo || homeLogo) {
-    const awayCol = el('div'); awayCol.style.cssText = 'text-align:center;flex:1;';
+    const awayCol = el('div'); awayCol.style.cssText = 'text-align:center;flex:1;min-width:0;';
     if (awayLogo) { const im = el('img'); im.src = awayLogo; im.className = 'swipe-team-logo'; awayCol.appendChild(im); }
     awayCol.appendChild(el('div', null, fullTeamName(ch.gameId, awayAbbr))).style.cssText = 'font-size:12px;font-weight:700;margin-top:6px;';
     logoRow.appendChild(awayCol);
     logoRow.appendChild(el('div', null, '@')).style.cssText = 'font-size:14px;color:var(--text-faint);font-weight:700;';
-    const homeCol = el('div'); homeCol.style.cssText = 'text-align:center;flex:1;';
+    const homeCol = el('div'); homeCol.style.cssText = 'text-align:center;flex:1;min-width:0;';
     if (homeLogo) { const im2 = el('img'); im2.src = homeLogo; im2.className = 'swipe-team-logo'; homeCol.appendChild(im2); }
     homeCol.appendChild(el('div', null, fullTeamName(ch.gameId, homeAbbr))).style.cssText = 'font-size:12px;font-weight:700;margin-top:6px;';
     logoRow.appendChild(homeCol);
@@ -2321,11 +2459,14 @@ function renderSwipeCart() {
     wrap.appendChild(row);
   });
 
-  const confirmBtn = el('button', 'lock-btn', `Confirm ${swipeCart.length} challenge${swipeCart.length === 1 ? '' : 's'}`);
+  const totalCartUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
+  const confirmLabel = (n, u) => `Confirm ${n} Challenge${n === 1 ? '' : 's'} (Total ${u} Unit${u === 1 ? '' : 's'})`;
+  const confirmBtn = el('button', 'lock-btn', confirmLabel(swipeCart.length, totalCartUnits));
   confirmBtn.style.marginTop = '12px';
   confirmBtn.onclick = async () => {
     confirmBtn.disabled = true; confirmBtn.textContent = 'Saving…';
     const snapshot = swipeCart.slice();
+    const snapshotUnits = totalCartUnits;
     snapshot.forEach(ch => {
       const idx = allPicks.findIndex(p => p.id === ch.id);
       if (idx > -1) { allPicks[idx].status = 'accepted'; allPicks[idx].acceptedBy = profile.name; }
@@ -2345,7 +2486,7 @@ function renderSwipeCart() {
       });
       removedMarkers.forEach(m => allPicks.push(m));
       alert("Couldn't confirm (" + describeFetchError(e) + ") — try again.");
-      confirmBtn.disabled = false; confirmBtn.textContent = `Confirm ${snapshot.length} challenges`;
+      confirmBtn.disabled = false; confirmBtn.textContent = confirmLabel(snapshot.length, snapshotUnits);
     }
   };
   wrap.appendChild(confirmBtn);
@@ -2511,16 +2652,26 @@ function renderGameCard(g, sport, meta) {
   const spread = computeSpread(sport, g);
   const totalVal = g.overUnder;
   const favSide = spread !== null ? (spread <= 0 ? g.home : g.away) : null;
+  const moneylineOnly = !!(LEAGUES_META.find(l => l.id === sport) || {}).moneylineOnly;
+  const hasSpread = moneylineOnly ? true : spread !== null;
+  const spreadPillLabel = moneylineOnly ? 'Moneyline' : 'Spread';
+  const hasTotal = !moneylineOnly && totalVal !== null && totalVal !== undefined;
+  const hasPlayerProp = sport === 'nfl';
+  const openSpread = myChallengeFor(g.id, 'spread');
+  const openTotal = myChallengeFor(g.id, 'total');
 
-  function renderPoolMarket(label, betType, hasMarket, defaultMagnitude, computeOptions) {
+  if (challengeTypeSelection[g.id] === undefined) {
+    challengeTypeSelection[g.id] = hasSpread ? 'spread' : (hasTotal ? 'total' : 'playerprop');
+  }
+
+  function renderPoolMarket(betType, hasMarket, defaultMagnitude, computeOptions) {
     const section = el('div');
-    section.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border);';
-    section.appendChild(el('div', null, label)).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;font-weight:700;margin-bottom:6px;';
-    if (!hasMarket) { section.appendChild(el('div', 'no-odds-note', 'No ' + label.toLowerCase() + ' posted')); return section; }
+    if (!hasMarket) { section.appendChild(el('div', 'no-odds-note', 'No ' + betType + ' posted')); return section; }
 
     const existing = myChallengeFor(g.id, betType);
     if (existing) {
       const note = el('div', 'locked-note');
+      note.style.marginTop = '8px';
       const spreadTxt = betType === 'spread' ? pickSpreadDisplay(existing) : null;
       const marketTxt = betType === 'total' ? (existing.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existing.line : existing.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
       note.innerHTML = `<div class="ln-title">You're offering</div>${marketTxt} · <b>${existing.units}u</b><div style="margin-top:4px;font-size:11.5px;color:var(--text-dim);">${challengeStatusText(existing)}</div>`;
@@ -2531,6 +2682,7 @@ function renderGameCard(g, sport, meta) {
     let magnitude = defaultMagnitude;
     const key = g.id + '_' + betType;
     const grid = el('div', 'outcome-grid');
+    grid.style.marginTop = '8px';
     section.appendChild(grid);
 
     function rebuildGrid() {
@@ -2548,40 +2700,44 @@ function renderGameCard(g, sport, meta) {
       });
     }
 
-    const adjustBtn = el('button', null, `\u270f\ufe0f Adjust ${betType === 'total' ? 'Total' : 'Line'}`);
-    adjustBtn.style.cssText = 'width:100%;margin-top:8px;background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:8px;font-size:12px;font-weight:700;';
+    const adjustRow = el('div');
+    adjustRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:6px;';
+    const adjustBtn = el('button', null, `\u270f\ufe0f Adjust`);
+    adjustBtn.style.cssText = 'background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;';
     const adjustPanel = el('div');
-    adjustPanel.style.cssText = 'display:none;margin-top:8px;gap:8px;align-items:center;';
+    adjustPanel.style.cssText = 'display:none;gap:8px;align-items:center;flex:1;min-width:0;';
     const adjustInput = el('input'); adjustInput.type = 'number'; adjustInput.step = '0.5'; adjustInput.value = magnitude !== null ? magnitude : '';
-    adjustInput.style.cssText = 'flex:1;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;';
+    adjustInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;';
     const applyBtn = el('button', null, 'Apply');
-    applyBtn.style.cssText = 'background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:8px 14px;font-size:12px;font-weight:700;';
+    applyBtn.style.cssText = 'background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;flex-shrink:0;';
     adjustPanel.appendChild(adjustInput); adjustPanel.appendChild(applyBtn);
-    adjustBtn.onclick = () => { adjustPanel.style.display = adjustPanel.style.display === 'none' ? 'flex' : 'none'; };
+    adjustBtn.onclick = () => { adjustPanel.style.display = 'flex'; adjustBtn.style.display = 'none'; };
     applyBtn.onclick = () => {
       const val = parseFloat(adjustInput.value);
       if (isNaN(val) || val < 0) return;
       magnitude = val;
       rebuildGrid();
+      adjustPanel.style.display = 'none';
+      adjustBtn.style.display = '';
     };
     if (defaultMagnitude !== null) {
-      section.appendChild(adjustBtn);
-      section.appendChild(adjustPanel);
+      adjustRow.appendChild(adjustBtn);
+      adjustRow.appendChild(adjustPanel);
+      section.appendChild(adjustRow);
     }
     rebuildGrid();
 
     const slip = el('div', 'bet-slip');
-    const bsRow = el('div', 'bs-row');
-    bsRow.appendChild(el('label', null, 'Units'));
-    const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = '1';
-    bsRow.appendChild(unitsInput);
-    slip.appendChild(bsRow);
-
+    const row2 = el('div'); row2.style.cssText = 'display:grid;grid-template-columns:0.8fr 1.4fr;gap:8px;';
+    const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = '1'; unitsInput.placeholder = 'Units';
+    unitsInput.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px;font-family:var(--font-mono);font-size:13px;min-width:0;box-sizing:border-box;';
+    row2.appendChild(unitsInput);
     const visSel = el('select');
-    visSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin:8px 0;box-sizing:border-box;';
+    visSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
     const publicOpt = document.createElement('option'); publicOpt.value = ''; publicOpt.textContent = '\ud83d\udce2 Post publicly'; visSel.appendChild(publicOpt);
-    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 Send to ' + p; visSel.appendChild(o); });
-    slip.appendChild(visSel);
+    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel.appendChild(o); });
+    row2.appendChild(visSel);
+    slip.appendChild(row2);
 
     const createBtn = el('button', 'lock-btn', 'Select a side');
     createBtn.disabled = true;
@@ -2602,6 +2758,9 @@ function renderGameCard(g, sport, meta) {
       if (betType === 'total') {
         line = magnitude;
         spreadLabel = null;
+      } else if (magnitude === null) {
+        line = null;
+        spreadLabel = null; // moneyline — settlement falls back to straight winner comparison
       } else {
         const isFav = displaySide === favSide;
         spreadLabel = magnitude === 0 ? 'PK' : (isFav ? '-' + magnitude : '+' + magnitude);
@@ -2638,37 +2797,24 @@ function renderGameCard(g, sport, meta) {
     return section;
   }
 
-  card.appendChild(renderPoolMarket('Spread', 'spread', spread !== null, spread !== null ? Math.abs(spread) : null, (magnitude) => {
-    if (magnitude === null) return [{ side: g.away, team: g.away, label: 'ML' }, { side: g.home, team: g.home, label: 'ML' }];
-    const favLabel = magnitude === 0 ? 'PK' : '-' + magnitude;
-    const udLabel = magnitude === 0 ? 'PK' : '+' + magnitude;
-    return [g.away, g.home].map(ab => ({ side: ab, team: ab, label: ab === favSide ? favLabel : udLabel }));
-  }));
-  card.appendChild(renderPoolMarket('Total', 'total', totalVal !== null && totalVal !== undefined, totalVal !== null && totalVal !== undefined ? totalVal : null, (magnitude) => {
-    if (magnitude === null) return [{ side: 'OVER', team: 'Over', label: '—' }, { side: 'UNDER', team: 'Under', label: '—' }];
-    return [{ side: 'OVER', team: 'Over', label: String(magnitude) }, { side: 'UNDER', team: 'Under', label: String(magnitude) }];
-  }));
-
-  if (sport === 'nfl') {
+  function renderPlayerPropPanel() {
     const section = el('div');
-    section.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border);';
-    section.appendChild(el('div', null, 'Player Prop (beta)')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;font-weight:700;margin-bottom:6px;';
-
     const nameInput = el('input'); nameInput.placeholder = "Player name (e.g. Jalen Hurts)";
-    nameInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin-bottom:8px;box-sizing:border-box;';
+    nameInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:13px;margin-top:8px;box-sizing:border-box;';
     section.appendChild(nameInput);
 
-    const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1.4fr 1fr;gap:8px;margin-bottom:8px;';
+    const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1.4fr 1fr;gap:8px;margin-top:8px;';
     const catSel = el('select');
-    catSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+    catSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
     PLAYER_PROP_CATEGORIES.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.label; catSel.appendChild(o); });
     row.appendChild(catSel);
-    const lineInput = el('input'); lineInput.type = 'number'; lineInput.step = '0.5'; lineInput.placeholder = 'Line (e.g. 249.5)';
-    lineInput.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+    const lineInput = el('input'); lineInput.type = 'number'; lineInput.step = '0.5'; lineInput.placeholder = 'Line';
+    lineInput.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
     row.appendChild(lineInput);
     section.appendChild(row);
 
     const sideGrid = el('div', 'outcome-grid');
+    sideGrid.style.marginTop = '8px';
     let chosenSide = null;
     ['OVER','UNDER'].forEach(sv => {
       const btn = el('div', 'outcome-btn');
@@ -2684,17 +2830,16 @@ function renderGameCard(g, sport, meta) {
     section.appendChild(sideGrid);
 
     const slip = el('div', 'bet-slip');
-    const bsRow = el('div', 'bs-row');
-    bsRow.appendChild(el('label', null, 'Units'));
-    const unitsInput2 = el('input'); unitsInput2.type = 'number'; unitsInput2.min = '0.5'; unitsInput2.step = '0.5'; unitsInput2.value = '1';
-    bsRow.appendChild(unitsInput2);
-    slip.appendChild(bsRow);
-
+    const row2 = el('div'); row2.style.cssText = 'display:grid;grid-template-columns:0.8fr 1.4fr;gap:8px;';
+    const unitsInput2 = el('input'); unitsInput2.type = 'number'; unitsInput2.min = '0.5'; unitsInput2.step = '0.5'; unitsInput2.value = '1'; unitsInput2.placeholder = 'Units';
+    unitsInput2.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px;font-family:var(--font-mono);font-size:13px;min-width:0;box-sizing:border-box;';
+    row2.appendChild(unitsInput2);
     const visSel2 = el('select');
-    visSel2.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin:8px 0;box-sizing:border-box;';
+    visSel2.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px;font-size:12px;min-width:0;box-sizing:border-box;';
     const publicOpt2 = document.createElement('option'); publicOpt2.value = ''; publicOpt2.textContent = '\ud83d\udce2 Post publicly'; visSel2.appendChild(publicOpt2);
-    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 Send to ' + p; visSel2.appendChild(o); });
-    slip.appendChild(visSel2);
+    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 ' + p; visSel2.appendChild(o); });
+    row2.appendChild(visSel2);
+    slip.appendChild(row2);
 
     const createBtn2 = el('button', 'lock-btn', 'Select Over or Under');
     createBtn2.disabled = true;
@@ -2736,7 +2881,37 @@ function renderGameCard(g, sport, meta) {
       }
     };
     visSel2.onchange = () => { createBtn2.textContent = visSel2.value ? 'Send to ' + visSel2.value : 'Post publicly'; };
-    card.appendChild(section);
+    return section;
+  }
+
+  const pillRow = el('div', 'league-scroller');
+  pillRow.style.cssText = 'padding:10px 0 0;margin:0;';
+  const types = [];
+  if (hasSpread) types.push(['spread', spreadPillLabel, !!openSpread]);
+  if (hasTotal) types.push(['total', 'Total', !!openTotal]);
+  if (hasPlayerProp) types.push(['playerprop', 'Player Prop', false]);
+  types.forEach(([id, label, isOffered]) => {
+    const pill = el('button', 'league-pill' + (challengeTypeSelection[g.id] === id ? ' active' : '') + (isOffered ? ' offered' : ''), label + (isOffered ? ' \u2713' : ''));
+    pill.onclick = () => { challengeTypeSelection[g.id] = id; render(); };
+    pillRow.appendChild(pill);
+  });
+  card.appendChild(pillRow);
+
+  const sel = challengeTypeSelection[g.id];
+  if (sel === 'spread') {
+    card.appendChild(renderPoolMarket('spread', hasSpread, (spread !== null) ? Math.abs(spread) : null, (magnitude) => {
+      if (magnitude === null) return [{ side: g.away, team: g.away, label: 'ML' }, { side: g.home, team: g.home, label: 'ML' }];
+      const favLabel = magnitude === 0 ? 'PK' : '-' + magnitude;
+      const udLabel = magnitude === 0 ? 'PK' : '+' + magnitude;
+      return [g.away, g.home].map(ab => ({ side: ab, team: ab, label: ab === favSide ? favLabel : udLabel }));
+    }));
+  } else if (sel === 'total') {
+    card.appendChild(renderPoolMarket('total', hasTotal, hasTotal ? totalVal : null, (magnitude) => {
+      if (magnitude === null) return [{ side: 'OVER', team: 'Over', label: '—' }, { side: 'UNDER', team: 'Under', label: '—' }];
+      return [{ side: 'OVER', team: 'Over', label: String(magnitude) }, { side: 'UNDER', team: 'Under', label: String(magnitude) }];
+    }));
+  } else if (sel === 'playerprop') {
+    card.appendChild(renderPlayerPropPanel());
   }
 
   return card;
@@ -2751,6 +2926,7 @@ function parseSpreadLabel(label) {
 function settlePick(p) {
   if (p.settledResult) return p.settledResult;
   if (p.propType === 'player') return { status: 'pending' }; // resolved by persistNewlySettledPlayerProps
+  if (p.propType === 'golf_h2h') return { status: 'pending' }; // resolved by persistNewlySettledGolfH2H
   const idx = gameIndex[p.gameId];
   if (!idx) return { status: 'pending' };
   const g = idx.game;
@@ -2876,6 +3052,76 @@ async function persistNewlySettledPlayerProps() {
     const outcome = diff === 0 ? 'push' : (p.sideAbbr === 'OVER' ? (diff > 0 ? 'win' : 'loss') : (diff < 0 ? 'win' : 'loss'));
     p.settledResult = outcome === 'push' ? { status: 'push' } : { status: outcome, profit: outcome === 'win' ? p.units : -p.units };
     p.actualStatValue = val;
+    changed = true;
+  }
+  if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; retry next cycle */ } }
+  return changed;
+}
+
+// ---------- Golf: field fetch + head-to-head matchups ----------
+// NOTE: golf's scoreboard shape (a full field of players in one event, not two competitors) is genuinely
+// different from every other sport here, and I have not verified the exact JSON fields live. Built defensively
+// with fallbacks — test after deploying and report back exactly what's wrong if a matchup won't settle.
+let golfFieldCache = null; // { tournamentId, tournamentName, completed, players: [{id, name, score}] } | null
+let golfFieldAttempted = false;
+let golfFieldCacheTime = 0;
+function parseGolfScore(s) {
+  if (s === null || s === undefined) return null;
+  const str = String(s).trim();
+  if (str === '' ) return null;
+  if (str.toUpperCase() === 'E') return 0;
+  const n = parseFloat(str.replace(/^\+/, ''));
+  return isNaN(n) ? null : n;
+}
+async function fetchGolfField(forceRefresh) {
+  if (!forceRefresh && golfFieldCache && (Date.now() - golfFieldCacheTime < 5 * 60 * 1000)) return golfFieldCache;
+  try {
+    const res = await fetch('https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard');
+    golfFieldAttempted = true;
+    if (!res.ok) return golfFieldCache;
+    const json = await res.json();
+    const ev = json.events && json.events[0];
+    if (!ev) { golfFieldCache = null; golfFieldCacheTime = Date.now(); return null; }
+    const comp = ev.competitions && ev.competitions[0];
+    const competitors = (comp && comp.competitors) || [];
+    const completed = !!(ev.status && ev.status.type && (ev.status.type.completed || ev.status.type.state === 'post'));
+    const players = competitors.map(c => {
+      const athlete = c.athlete || {};
+      const scoreRaw = (c.score !== undefined && c.score !== null) ? c.score : (c.statistics && c.statistics[0] && c.statistics[0].displayValue);
+      return {
+        id: String(athlete.id || c.id || athlete.displayName || ''),
+        name: athlete.displayName || athlete.shortName || null,
+        score: parseGolfScore(scoreRaw)
+      };
+    }).filter(p => p.name);
+    golfFieldCache = { tournamentId: ev.id, tournamentName: ev.name || ev.shortName || 'PGA Tour Event', completed, players };
+    golfFieldCacheTime = Date.now();
+    return golfFieldCache;
+  } catch (e) { golfFieldAttempted = true; return golfFieldCache; }
+}
+function findGolferByName(field, typedName) {
+  if (!field) return null;
+  const norm = typedName.toLowerCase().trim();
+  let match = field.players.find(p => p.name.toLowerCase() === norm);
+  if (match) return match;
+  match = field.players.find(p => p.name.toLowerCase().includes(norm) || norm.includes(p.name.toLowerCase()));
+  return match || null;
+}
+async function persistNewlySettledGolfH2H() {
+  let changed = false;
+  const toCheck = allPicks.filter(p => p.poolType === 'challenge' && p.propType === 'golf_h2h' && !p.settledResult && (p.status === 'open' || p.status === 'accepted'));
+  if (!toCheck.length) return false;
+  const field = await fetchGolfField(false);
+  if (!field || !field.completed) return false; // only settle once the tournament itself is final
+  for (const p of toCheck) {
+    const a = findGolferByName(field, p.playerA);
+    const b = findGolferByName(field, p.playerB);
+    if (!a || !b || a.score === null || b.score === null) { if (!p.playerNotFound) { p.playerNotFound = true; changed = true; } continue; }
+    if (a.score === b.score) { p.settledResult = { status: 'push' }; changed = true; continue; }
+    const winnerName = a.score < b.score ? p.playerA : p.playerB; // lower score wins
+    const outcome = winnerName === p.sideAbbr ? 'win' : 'loss';
+    p.settledResult = { status: outcome, profit: outcome === 'win' ? p.units : -p.units };
+    p.finalScores = { [p.playerA]: a.score, [p.playerB]: b.score };
     changed = true;
   }
   if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; retry next cycle */ } }
