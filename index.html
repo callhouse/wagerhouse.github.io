@@ -42,12 +42,13 @@
   .tab { flex: 1; text-align: center; padding: 10px 4px; font-size: 12px; font-weight: 700; color: var(--text-faint); border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.02em; }
   .tab.active { color: var(--accent); border-color: var(--accent); }
 
-  .league-scroller { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px 8px; scrollbar-width: none; }
+  .league-scroller { display: flex; gap: 6px; overflow-x: auto; padding: 3px 16px 3px; scrollbar-width: none; }
   .league-scroller::-webkit-scrollbar { display: none; }
   .league-pill { flex: 0 0 auto; padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); font-size: 11px; font-weight: 700; white-space: nowrap; text-transform: uppercase; }
   .league-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
   .league-pill.offered { border-color: #4CAF50; color: #4CAF50; }
   .league-pill.offered.active { background: #4CAF50; border-color: #4CAF50; color: #0a1f0c; }
+  .league-pill.offered.outline-only.active { background: var(--accent); border-color: #4CAF50; color: var(--accent-text); }
   .league-pill.off { opacity: 0.5; }
 
   main { padding: 4px 16px 8px; }
@@ -306,7 +307,7 @@ let allPicks = [];
 let players = [];
 let activeTab = 'games';
 let activeSport = 'nfl';
-let gamesDateFilter = 'week'; // 'today' | 'week'
+let gamesDateFilter = 'week'; // 'today' | 'tomorrow' | 'week'
 let selectedSide = {};
 let picksLeagueFilter = null; // null = show all leagues; else a single sport id
 let picksSortMode = 'date_desc';
@@ -341,7 +342,7 @@ let activeChallengesOpen = true;
 let completedChallengesOpen = true;
 let acceptedChallengeLeague = null; // sport id or null
 let openChallengeLeague = null; // sport id or null
-let openChallengeDateFilter = 'week'; // 'today' | 'week'
+let openChallengeDateFilter = 'week'; // 'today' | 'tomorrow' | 'week'
 let openChallengeTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'player' | 'golf'
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
@@ -2010,7 +2011,7 @@ function renderGames() {
   }
 
   const dateScroller = el('div', 'league-scroller');
-  [['today','Today'],['week','This Week']].forEach(([id,label]) => {
+  [['today','Today'],['tomorrow','Tomorrow'],['week','This Week']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (gamesDateFilter === id ? ' active' : ''), label);
     pill.onclick = () => { gamesDateFilter = id; render(); };
     dateScroller.appendChild(pill);
@@ -2024,6 +2025,10 @@ function renderGames() {
     const gd = new Date(g.start);
     if (gamesDateFilter === 'today') {
       return gd.getFullYear() === now.getFullYear() && gd.getMonth() === now.getMonth() && gd.getDate() === now.getDate();
+    }
+    if (gamesDateFilter === 'tomorrow') {
+      const tmrw = new Date(startOfToday); tmrw.setDate(tmrw.getDate() + 1);
+      return gd.getFullYear() === tmrw.getFullYear() && gd.getMonth() === tmrw.getMonth() && gd.getDate() === tmrw.getDate();
     }
     const weekEnd = new Date(startOfToday); weekEnd.setDate(weekEnd.getDate() + 7);
     return gd >= startOfToday && gd < weekEnd;
@@ -2366,7 +2371,7 @@ function renderSwipeCard(ch) {
   const cardWrap = el('div');
   cardWrap.style.cssText = 'position:relative;touch-action:pan-y;user-select:none;display:flex;flex-direction:column;';
   const card = el('div', 'swipe-card-big');
-  card.style.cssText = 'padding:16px;cursor:grab;border-radius:14px;background:#E3D2A6;border:1px solid #C9B482;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
+  card.style.cssText = 'padding:26px 22px;cursor:grab;border-radius:14px;background:#E3D2A6;border:1px solid #C9B482;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
   const marketTxt = challengeMarketTxt(ch);
   const leagueLabel = (LEAGUES_META.find(l => l.id === ch.sport) || {}).label || (ch.sport || 'sport').toUpperCase();
   const gTime = gameTimeLabel(ch.gameId);
@@ -2499,7 +2504,8 @@ function renderSwipeCart() {
   wrap.appendChild(el('div', 'week-header', `Your cart (${swipeCart.length})`));
   if (!swipeCart.length) { wrap.appendChild(el('div', 'empty', 'No accepted challenges yet — swipe right on some first.')); return wrap; }
 
-  swipeCart.forEach((ch, i) => {
+  const sortedCart = swipeCart.slice().sort((a,b) => b.units - a.units);
+  sortedCart.forEach((ch) => {
     const row = el('div', 'pick-row');
     const left = el('div');
     const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
@@ -2512,7 +2518,7 @@ function renderSwipeCart() {
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
     rmBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:26px;height:26px;font-size:12px;';
-    rmBtn.onclick = () => { swipeCart.splice(i,1); recordSwipeCartRemove(ch.id); render(); };
+    rmBtn.onclick = () => { const idx = swipeCart.findIndex(c => c.id === ch.id); if (idx > -1) swipeCart.splice(idx,1); recordSwipeCartRemove(ch.id); render(); };
     row.appendChild(rmBtn);
     wrap.appendChild(row);
   });
@@ -2586,7 +2592,7 @@ function renderExistingChallenges() {
   }
 
   const dateScroller = el('div', 'league-scroller');
-  [['today','Today'],['week','This Week']].forEach(([id,label]) => {
+  [['today','Today'],['tomorrow','Tomorrow'],['week','This Week']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (openChallengeDateFilter === id ? ' active' : ''), label);
     pill.onclick = () => { openChallengeDateFilter = id; swipeStackInitialized = false; render(); };
     dateScroller.appendChild(pill);
@@ -2608,6 +2614,10 @@ function renderExistingChallenges() {
     const gd = new Date(idx.game.start);
     if (openChallengeDateFilter === 'today') {
       return gd.getFullYear() === now.getFullYear() && gd.getMonth() === now.getMonth() && gd.getDate() === now.getDate();
+    }
+    if (openChallengeDateFilter === 'tomorrow') {
+      const tmrw = new Date(startOfToday); tmrw.setDate(tmrw.getDate() + 1);
+      return gd.getFullYear() === tmrw.getFullYear() && gd.getMonth() === tmrw.getMonth() && gd.getDate() === tmrw.getDate();
     }
     const weekEnd = new Date(startOfToday); weekEnd.setDate(weekEnd.getDate() + 7);
     return gd >= startOfToday && gd < weekEnd;
@@ -3025,9 +3035,13 @@ function renderGameCard(g, sport, meta) {
   const types = [];
   if (hasSpread) types.push(['spread', spreadPillLabel, !!openSpread]);
   if (hasTotal) types.push(['total', 'Total', !!openTotal]);
-  if (hasPlayerProp) types.push(['playerprop', 'Player Prop', false]);
+  if (hasPlayerProp) {
+    const hasOpenPlayerProp = allPicks.some(p => p.poolType === 'challenge' && p.propType === 'player' && p.creator === profile.name && p.gameId === g.id && p.status === 'open');
+    types.push(['playerprop', 'Player Prop', hasOpenPlayerProp]);
+  }
   types.forEach(([id, label, isOffered]) => {
-    const pill = el('button', 'league-pill' + (challengeTypeSelection[g.id] === id ? ' active' : '') + (isOffered ? ' offered' : ''), label + (isOffered ? ' \u2713' : ''));
+    const outlineOnly = id === 'playerprop';
+    const pill = el('button', 'league-pill' + (challengeTypeSelection[g.id] === id ? ' active' : '') + (isOffered ? ' offered' : '') + (outlineOnly ? ' outline-only' : ''), label + (isOffered ? ' \u2713' : ''));
     pill.onclick = () => { challengeTypeSelection[g.id] = id; render(); };
     pillRow.appendChild(pill);
   });
