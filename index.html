@@ -741,7 +741,14 @@ function renderTabs() {
 async function completeLoginSetup() {
   const g = await loadGlobalData();
   players = g.players; allPicks = g.picks;
-  activeTab = 'games';
+  appSection = 'pools';
+  activeTab = 'existing';
+  existingChallengeView = 'global';
+  challengeBrowseMode = 'swipe';
+  openChallengeLeague = null;
+  openChallengeTypeFilter = 'all';
+  openChallengeDateFilter = 'week';
+  swipeStackInitialized = false;
   render();
   (async () => {
     try {
@@ -1497,25 +1504,46 @@ function renderProfitTrendBareSVG(days) {
   const w = 320, h = 150, padL = 38, padR = 8, padT = 10, padB = 28;
   const innerW = w - padL - padR, innerH = h - padT - padB;
   let cum = 0;
-  const pts = days.map(d => { cum += d.profit; return cum; });
-  const minV = Math.min(0, ...pts), maxV = Math.max(0, ...pts);
+  const bars = days.map(d => {
+    const start = cum;
+    cum += d.profit;
+    return { start, end: cum, profit: d.profit };
+  });
+  const allVals = bars.flatMap(b => [b.start, b.end]);
+  const minV = Math.min(0, ...allVals), maxV = Math.max(0, ...allVals);
   const range = (maxV - minV) || 1;
-  const n = pts.length;
-  const xScale = i => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const n = bars.length;
+  const slotW = innerW / n;
+  const barW = Math.max(4, slotW * 0.6);
+  const xCenter = i => padL + slotW * (i + 0.5);
   const yScale = v => padT + innerH - ((v - minV) / range) * innerH;
-  const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i).toFixed(1)} ${yScale(v).toFixed(1)}`).join(' ');
   const zeroY = yScale(0);
-  const last = pts[pts.length - 1];
+
+  const connectors = bars.slice(0, -1).map((b, i) => {
+    const x1 = xCenter(i) + barW / 2;
+    const x2 = xCenter(i + 1) - barW / 2;
+    const y = yScale(b.end);
+    return `<line x1="${x1.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,2"/>`;
+  }).join('');
+  const barsSvg = bars.map((b, i) => {
+    const x = xCenter(i) - barW / 2;
+    const yTop = yScale(Math.max(b.start, b.end));
+    const yBot = yScale(Math.min(b.start, b.end));
+    const height = Math.max(1.5, yBot - yTop);
+    const color = b.profit >= 0 ? '#4CAF50' : 'var(--danger)';
+    return `<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${height.toFixed(1)}" fill="${color}" rx="2"/>`;
+  }).join('');
+
   const fmtDate = k => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const labelIdxs = n <= 4 ? days.map((_,i) => i) : [0, Math.floor((n-1)/2), n-1];
-  const labels = labelIdxs.map(i => `<text x="${xScale(i).toFixed(1)}" y="${h - 6}" font-size="9" text-anchor="middle" style="fill:var(--text-faint)" font-family="var(--font-mono)">${fmtDate(days[i].dateKey)}</text>`).join('');
-  const dots = pts.map((v,i) => `<circle cx="${xScale(i).toFixed(1)}" cy="${yScale(v).toFixed(1)}" r="3" style="fill:${last >= 0 ? '#4CAF50' : 'var(--danger)'}"/>`).join('');
+  const labelIdxs = n <= 4 ? bars.map((_,i) => i) : [0, Math.floor((n-1)/2), n-1];
+  const labels = labelIdxs.map(i => `<text x="${xCenter(i).toFixed(1)}" y="${h - 6}" font-size="9" text-anchor="middle" style="fill:var(--text-faint)" font-family="var(--font-mono)">${fmtDate(days[i].dateKey)}</text>`).join('');
+
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">
     <line x1="${padL}" y1="${zeroY}" x2="${padL + innerW}" y2="${zeroY}" style="stroke:var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
     <text x="2" y="${zeroY + 3}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">$0</text>
     <text x="2" y="${padT + 8}" font-size="9" style="fill:var(--text-faint)" font-family="var(--font-mono)">${maxV.toFixed(0)}</text>
-    <path d="${d}" fill="none" style="stroke:${last >= 0 ? '#4CAF50' : 'var(--danger)'}" stroke-width="2"/>
-    ${dots}
+    ${connectors}
+    ${barsSvg}
     ${labels}
   </svg>`;
 }
@@ -1529,12 +1557,13 @@ function renderProfitChart(days) {
     const W = 320, padL = 38, padR = 8;
     const innerW = W - padL - padR;
     const n = days.length;
-    const xScale = i => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-    const slotWidthPct = Math.max((innerW / W) * 100 / n, 4);
+    const slotW = innerW / n;
+    const xCenter = i => padL + slotW * (i + 0.5);
+    const slotWidthPct = Math.max((slotW / W) * 100, 4);
     const overlay = el('div');
     overlay.style.cssText = 'position:absolute;inset:0;';
     days.forEach((day, i) => {
-      const pct = (xScale(i) / W) * 100;
+      const pct = (xCenter(i) / W) * 100;
       const btn = el('div');
       btn.style.cssText = `position:absolute;top:0;bottom:0;left:${(pct - slotWidthPct/2).toFixed(2)}%;width:${slotWidthPct.toFixed(2)}%;cursor:pointer;`;
       btn.title = day.dateKey;
@@ -3847,7 +3876,14 @@ function renderLeaderboard() {
 (async function init() {
   loadProfile();
   loadSession();
-  loadNavState();
+  appSection = 'pools';
+  activeTab = 'existing';
+  existingChallengeView = 'global';
+  challengeBrowseMode = 'swipe';
+  openChallengeLeague = null;
+  openChallengeTypeFilter = 'all';
+  openChallengeDateFilter = 'week';
+  swipeStackInitialized = false;
 
   if (profile && session) {
     const ok = await ensureFreshSession().catch(() => false);
