@@ -274,6 +274,7 @@ let trackerDateFilter = 'all'; // 'week' | 'month' | 'year' | 'all' | a specific
 let trackerLeagueFilter = null; // sport id or null
 let trackerTeamFilter = null; // team abbr or null
 let trackerBetTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'moneyline' | 'parlay'
+let existingChallengeView = 'global'; // 'global' | 'friends'
 let trackerWizardLegs = []; // legs accumulated for an in-progress parlay, persists across wizard re-renders
 let trackerWizard = {}; // in-progress wizard state, reset each time the wizard opens
 let weeklySelectedSide = {}; // gameId+betType -> chosen side ('OVER'/'UNDER' or team abbr), unsaved until locked
@@ -474,9 +475,8 @@ function renderInner() {
   } else {
     renderTabs();
     if (activeTab === 'games') main.appendChild(renderGames());
-    else if (activeTab === 'picks') main.appendChild(renderMyPicks());
-    else if (activeTab === 'stats') main.appendChild(renderStats());
-    else if (activeTab === 'board') main.appendChild(renderLeaderboard());
+    else if (activeTab === 'existing') main.appendChild(renderExistingChallenges());
+    else if (activeTab === 'completed') main.appendChild(renderCompletedChallenges());
   }
   window.scrollTo(0, scrollY);
 }
@@ -485,7 +485,7 @@ function renderSectionSwitch() {
   const bar = document.getElementById('sectionSwitch');
   bar.innerHTML = '';
   if (!profile) return;
-  [['daily','House Bank'],['pools','Pools'],['kalshi','Tracker']].forEach(([id,label]) => {
+  [['daily','House Bet'],['pools','Challenge'],['kalshi','3rd Party Bets']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (appSection === id ? ' active' : ''), label);
     t.onclick = () => { appSection = id; render(); };
     bar.appendChild(t);
@@ -496,7 +496,7 @@ function renderTabs() {
   const bar = document.getElementById('tabbar');
   bar.innerHTML = '';
   if (!profile) return;
-  [['games','Games'],['picks','My Bets'],['stats','Stats'],['board','Leaderboard']].forEach(([id,label]) => {
+  [['games','Make Challenge'],['existing','Existing Challenges'],['completed','Completed Challenges']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (activeTab === id ? ' active' : ''), label);
     t.onclick = () => { activeTab = id; render(); };
     bar.appendChild(t);
@@ -566,24 +566,50 @@ function chipsFor(units) {
   return '\ud83d\udd25'.repeat(Math.max(0, Math.min(3, Math.round(units))));
 }
 
-function eligibleWeekGames() {
-  const wk = houseWeekKey(new Date());
-  const seen = new Set();
-  const out = [];
+function houseDayKey(d) { const dt = new Date(d); dt.setHours(0,0,0,0); return dt.toISOString().slice(0,10); }
+function seededRandom(seedStr) {
+  let h = 0;
+  for (let i = 0; i < seedStr.length; i++) h = (Math.imul(31, h) + seedStr.charCodeAt(i)) | 0;
+  return function() {
+    h = Math.imul(h ^ (h >>> 15), h | 1);
+    h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
+    return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let cachedDailyOptions = null;
+let cachedDailyOptionsKey = null;
+function dailyRandomOptions() {
+  const dayKey = houseDayKey(new Date());
+  if (cachedDailyOptionsKey === dayKey && cachedDailyOptions) return cachedDailyOptions;
+
+  const rand = seededRandom(dayKey);
+  const pool = [];
   LEAGUES_META.filter(l => l.active).forEach(lg => {
     (DATA[lg.id] || []).forEach(g => {
-      if (seen.has(g.id)) return;
       if (g.status !== 'scheduled') return;
-      if (houseWeekKey(new Date(g.start)) !== wk) return;
-      const hasSpread = computeSpread(lg.id, g) !== null;
-      const hasTotal = g.overUnder !== null && g.overUnder !== undefined;
-      if (!hasSpread && !hasTotal) return;
-      seen.add(g.id);
-      out.push({ sport: lg.id, game: g });
+      if (houseDayKey(new Date(g.start)) !== dayKey) return;
+      const spreadVal = computeSpread(lg.id, g);
+      if (spreadVal !== null) {
+        const side = rand() < 0.5 ? g.home : g.away;
+        const line = side === g.home ? spreadVal : -spreadVal;
+        pool.push({ sport: lg.id, gameId: g.id, betType: 'spread', side, line, label: `${side} ${line === 0 ? 'PK' : (line > 0 ? '+' + line : line)}` });
+      }
+      const totalVal = g.overUnder;
+      if (totalVal !== null && totalVal !== undefined) {
+        const side = rand() < 0.5 ? 'OVER' : 'UNDER';
+        pool.push({ sport: lg.id, gameId: g.id, betType: 'total', side, line: totalVal, label: `${side === 'OVER' ? 'Over' : 'Under'} ${totalVal}` });
+      }
     });
   });
-  out.sort((a,b) => new Date(a.game.start) - new Date(b.game.start));
-  return out;
+
+  if (pool.length < 10) { cachedDailyOptions = null; cachedDailyOptionsKey = dayKey; return null; }
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  cachedDailyOptions = pool.slice(0, 10);
+  cachedDailyOptionsKey = dayKey;
+  return cachedDailyOptions;
 }
 function weeklyBetsFor(name, wk) {
   return allPicks.filter(p => p.player === name && p.poolType === 'weekly' && p.weekKey === wk);
@@ -639,14 +665,18 @@ function weeklyAllSettled(name, wk) {
 function allWeekKeysFor(name) {
   return [...new Set(allPicks.filter(p => p.player === name && p.poolType === 'weekly').map(p => p.weekKey))].sort();
 }
-function whRating(name, uptoWeekExclusive) {
-  let rating = WH_RATING_BASE;
-  allWeekKeysFor(name).forEach(wk => {
-    if (uptoWeekExclusive && wk >= uptoWeekExclusive) return;
-    if (!weeklyAllSettled(name, wk)) return;
-    rating += Math.round(weeklyNetUnits(name, wk));
-  });
-  return rating;
+function totalUnitsWon(name) {
+  return allWeekKeysFor(name).reduce((s,wk) => weeklyAllSettled(name, wk) ? s + weeklyNetUnits(name, wk) : s, 0);
+}
+function positiveStreak(name) {
+  const weeks = allWeekKeysFor(name).slice().sort().reverse();
+  let streak = 0;
+  for (const wk of weeks) {
+    if (!weeklyAllSettled(name, wk)) continue;
+    if (weeklyNetUnits(name, wk) > 0) streak++;
+    else break;
+  }
+  return streak;
 }
 function weeklyLeaderboard(wk) {
   const names = players.length ? players.slice() : [];
@@ -672,8 +702,15 @@ function renderWeeklyBetsBar(bets) {
   detail.style.cssText = 'margin-top:10px;display:none;';
   bets.slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(p => {
     const r = settleWeeklyBet(p);
-    const resTxt = r.status === 'win' ? fmtUnits(r.profit) : r.status === 'loss' ? fmtUnits(r.profit) : r.status === 'push' ? 'Push' : 'Pending';
-    const color = r.status === 'win' ? 'var(--accent)' : r.status === 'loss' ? 'var(--danger)' : 'var(--gold)';
+    const idx = gameIndex[p.gameId];
+    let resTxt, color;
+    if (r.status === 'win' || r.status === 'loss') { resTxt = fmtUnits(r.profit); color = r.status === 'win' ? 'var(--accent)' : 'var(--danger)'; }
+    else if (r.status === 'push') { resTxt = 'Push'; color = 'var(--gold)'; }
+    else if (idx && idx.game.status === 'inprogress' && idx.game.score) {
+      const g = idx.game;
+      resTxt = `${g.score[g.away]}-${g.score[g.home]}${g.liveDetail ? ' · ' + g.liveDetail : ''}`;
+      color = 'var(--gold)';
+    } else { resTxt = 'Pending'; color = 'var(--gold)'; }
     const marketTxt = p.betType === 'total' ? (p.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + p.line : p.sideAbbr + ' ' + (p.line > 0 ? '+' + p.line : p.line);
     const line = el('div');
     line.style.cssText = 'font-size:12px;color:var(--text-dim);padding:7px 2px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;';
@@ -682,7 +719,6 @@ function renderWeeklyBetsBar(bets) {
     const rightWrap = el('div');
     rightWrap.style.cssText = 'display:flex;align-items:center;gap:8px;';
     rightWrap.appendChild(el('span', null, resTxt)).style.cssText = `color:${color};font-weight:700;white-space:nowrap;`;
-    const idx = gameIndex[p.gameId];
     if (idx && idx.game.status === 'scheduled') {
       const delBtn = el('button', null, '✕');
       delBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:24px;height:24px;font-size:11px;flex-shrink:0;';
@@ -698,145 +734,111 @@ function renderWeeklyBetsBar(bets) {
   return wrap;
 }
 
-function renderWeekGameCard(sport, game, remaining) {
+function renderDailyOptionCard(opt, remaining) {
+  const idx = gameIndex[opt.gameId];
+  if (!idx) return el('div');
+  const game = idx.game;
+  const sport = opt.sport;
   const card = el('div', 'event-card');
   const timeStr = new Date(game.start).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   card.appendChild(el('div', 'event-meta', game.title || timeStr));
   card.appendChild(el('div', null, `${game.teams[game.away].name} @ ${game.teams[game.home].name}`)).style.cssText = 'font-size:13.5px;font-weight:700;margin:6px 0 4px;';
   if (sport === 'mlb' && (game.awayPitcher || game.homePitcher)) {
-    card.appendChild(el('div', null, `${game.awayPitcher || 'TBD'} vs ${game.homePitcher || 'TBD'}`)).style.cssText = 'font-size:11px;color:var(--text-faint);margin:0 0 10px;';
+    card.appendChild(el('div', null, `${game.awayPitcher || 'TBD'} vs ${game.homePitcher || 'TBD'}`)).style.cssText = 'font-size:11px;color:var(--text-faint);margin:0 0 6px;';
   }
+  card.appendChild(el('div', null, `Pick: ${opt.label}`)).style.cssText = 'font-size:15px;font-weight:800;color:var(--accent);margin-bottom:10px;';
 
   const wk = houseWeekKey(new Date());
-  const myBets = weeklyBetsFor(profile.name, wk).filter(p => p.gameId === game.id);
-  const spreadBet = myBets.find(p => p.betType === 'spread');
-  const totalBet = myBets.find(p => p.betType === 'total');
-  const spreadVal = computeSpread(sport, game);
-  const totalVal = game.overUnder;
+  const existingBet = weeklyBetsFor(profile.name, wk).find(p => p.gameId === opt.gameId && p.betType === opt.betType);
 
-  function renderMarket(label, betType, hasMarket, existingBet, sideOptions) {
-    const section = el('div');
-    section.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border);';
-    section.appendChild(el('div', null, label)).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;font-weight:700;margin-bottom:6px;';
-    if (!hasMarket) { section.appendChild(el('div', 'no-odds-note', 'No ' + label.toLowerCase() + ' posted')); return section; }
-    if (existingBet) {
-      const note = el('div', 'locked-note');
-      const marketTxt = betType === 'total' ? (existingBet.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existingBet.line : existingBet.sideAbbr + ' ' + (existingBet.line > 0 ? '+' + existingBet.line : existingBet.line);
-      note.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
-      const infoDiv = el('div');
-      infoDiv.innerHTML = `<div class="ln-title">Your bet</div>${chipsFor(existingBet.units)} ${marketTxt} · <b>${existingBet.units}u</b>`;
-      note.appendChild(infoDiv);
+  if (existingBet) {
+    const note = el('div', 'locked-note');
+    note.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+    const infoDiv = el('div');
+    infoDiv.innerHTML = `<div class="ln-title">Your bet</div>${chipsFor(existingBet.units)} <b>${existingBet.units}u</b>`;
+    note.appendChild(infoDiv);
+    if (game.status === 'scheduled') {
       const delBtn = el('button', null, '✕');
       delBtn.style.cssText = 'background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;width:28px;height:28px;font-size:13px;flex-shrink:0;';
       delBtn.onclick = () => { if (confirm('Delete this bet? Your units will return to the bank.')) deletePick(existingBet.id); };
       note.appendChild(delBtn);
-      section.appendChild(note);
-      return section;
     }
-    if (remaining <= 0) { section.appendChild(el('div', 'no-odds-note', 'Bank empty this week')); return section; }
-
-    const key = game.id + '_' + betType;
-    const grid = el('div', 'outcome-grid');
-    let lockBtn;
-    sideOptions.forEach(opt => {
-      const btn = el('div', 'outcome-btn' + (weeklySelectedSide[key] === opt.side ? ' selected' : ''));
-      btn.innerHTML = `<div class="oc-team">${opt.team}</div><div class="oc-line">${opt.label}</div>`;
-      btn.onclick = () => {
-        weeklySelectedSide[key] = opt.side;
-        grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        updateLockState();
-      };
-      grid.appendChild(btn);
-    });
-    section.appendChild(grid);
-
-    const slip = el('div', 'bet-slip');
-    if (weeklySelectedUnits[key] === undefined) weeklySelectedUnits[key] = 0;
-    const cap = Math.min(HOUSE_BET_CAP, remaining);
-
-    const confRow = el('div');
-    confRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;';
-    const addBtn = el('button', null, '+ Add confidence');
-    addBtn.style.cssText = 'flex:1;background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:11px;font-size:13px;font-weight:700;';
-    const removeBtn = el('button', null, '\u2715');
-    removeBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:38px;height:38px;font-size:14px;flex-shrink:0;';
-    confRow.appendChild(addBtn);
-    confRow.appendChild(removeBtn);
-    slip.appendChild(confRow);
-
-    function refreshConfidenceUI() {
-      const u = weeklySelectedUnits[key];
-      addBtn.textContent = u > 0 ? `${chipsFor(u)}  Add confidence (${u}/${cap})` : '+ Add confidence';
-      addBtn.disabled = u >= cap;
-      removeBtn.disabled = u <= 0;
-      updateLockState();
-    }
-    addBtn.onclick = () => { if (weeklySelectedUnits[key] < cap) weeklySelectedUnits[key]++; refreshConfidenceUI(); };
-    removeBtn.onclick = () => { if (weeklySelectedUnits[key] > 0) weeklySelectedUnits[key]--; refreshConfidenceUI(); };
-
-    lockBtn = el('button', 'lock-btn', 'Pick a side and confidence');
-    lockBtn.disabled = true;
-    slip.appendChild(lockBtn);
-    const errEl = el('div', 'pick-error');
-    slip.appendChild(errEl);
-    section.appendChild(slip);
-
-    function updateLockState() {
-      const side = weeklySelectedSide[key], units = weeklySelectedUnits[key];
-      if (side && units) { lockBtn.disabled = false; lockBtn.textContent = `Lock: ${side === 'OVER' ? 'Over' : side === 'UNDER' ? 'Under' : side} · ${chipsFor(units)}`; }
-      else { lockBtn.disabled = true; lockBtn.textContent = 'Pick a side and confidence'; }
-    }
-    refreshConfidenceUI();
-    updateLockState();
-
-    lockBtn.onclick = async () => {
-      try {
-        const side = weeklySelectedSide[key];
-        const units = weeklySelectedUnits[key];
-        errEl.textContent = '';
-        if (!side) { errEl.textContent = 'Pick a side first.'; return; }
-        if (!units) { errEl.textContent = 'Pick 1, 2, or 3 flames.'; return; }
-        if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left in your bank this week.`; return; }
-        const line = betType === 'total' ? totalVal : (side === game.home ? spreadVal : -spreadVal);
-        const pick = {
-          id: profile.name + '_weekly_' + game.id + '_' + betType + '_' + Date.now(),
-          player: profile.name, sport, gameId: game.id,
-          gameLabel: game.away + ' @ ' + game.home,
-          betType, sideAbbr: side, line, units,
-          weekKey: wk, poolType: 'weekly',
-          timestamp: new Date().toISOString()
-        };
-        lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
-        allPicks.push(pick);
-        try {
-          await savePicks(allPicks);
-        } catch (saveErr) {
-          allPicks.pop();
-          lockBtn.disabled = false; lockBtn.textContent = 'Lock: ' + side;
-          const msg = describeFetchError(saveErr);
-          errEl.textContent = "Couldn't save (" + msg + ") — try again.";
-          alert('Save failed: ' + msg);
-          return;
-        }
-        render();
-      } catch (outerErr) {
-        const msg = (outerErr && outerErr.message) ? outerErr.message : String(outerErr);
-        alert('Unexpected error locking this bet: ' + msg);
-        lockBtn.disabled = false;
-      }
-    };
-    return section;
+    card.appendChild(note);
+    return card;
   }
+  if (game.status !== 'scheduled') {
+    card.appendChild(el('div', 'no-odds-note', 'Game already started — this option is no longer available'));
+    return card;
+  }
+  if (remaining <= 0) { card.appendChild(el('div', 'no-odds-note', 'Bank empty this week')); return card; }
 
-  card.appendChild(renderMarket('Spread', 'spread', spreadVal !== null, spreadBet, [
-    { side: game.away, team: game.away, label: spreadVal === null ? 'ML' : (-spreadVal === 0 ? 'PK' : (-spreadVal > 0 ? '+' + (-spreadVal) : (-spreadVal).toString())) },
-    { side: game.home, team: game.home, label: spreadVal === null ? 'ML' : (spreadVal === 0 ? 'PK' : (spreadVal > 0 ? '+' + spreadVal : spreadVal.toString())) },
-  ]));
-  card.appendChild(renderMarket('Total', 'total', totalVal !== null && totalVal !== undefined, totalBet, [
-    { side: 'OVER', team: 'Over', label: totalVal !== null && totalVal !== undefined ? String(totalVal) : '—' },
-    { side: 'UNDER', team: 'Under', label: totalVal !== null && totalVal !== undefined ? String(totalVal) : '—' },
-  ]));
+  const key = opt.gameId + '_' + opt.betType;
+  const slip = el('div', 'bet-slip');
+  if (weeklySelectedUnits[key] === undefined) weeklySelectedUnits[key] = 0;
+  const cap = Math.min(HOUSE_BET_CAP, remaining);
+
+  const confRow = el('div');
+  confRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;';
+  const addBtn = el('button', null, '+ Add confidence');
+  addBtn.style.cssText = 'flex:1;background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:11px;font-size:13px;font-weight:700;';
+  const removeBtn = el('button', null, '\u2715');
+  removeBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:38px;height:38px;font-size:14px;flex-shrink:0;';
+  confRow.appendChild(addBtn);
+  confRow.appendChild(removeBtn);
+  slip.appendChild(confRow);
+
+  const lockBtn = el('button', 'lock-btn', 'Pick a confidence level');
+  lockBtn.disabled = true;
+  slip.appendChild(lockBtn);
+  const errEl = el('div', 'pick-error');
+  slip.appendChild(errEl);
+  card.appendChild(slip);
+
+  function refreshConfidenceUI() {
+    const u = weeklySelectedUnits[key];
+    addBtn.textContent = u > 0 ? `${chipsFor(u)}  Add confidence (${u}/${cap})` : '+ Add confidence';
+    addBtn.disabled = u >= cap;
+    removeBtn.disabled = u <= 0;
+    lockBtn.disabled = u <= 0;
+    lockBtn.textContent = u > 0 ? `Lock: ${chipsFor(u)}` : 'Pick a confidence level';
+  }
+  addBtn.onclick = () => { if (weeklySelectedUnits[key] < cap) weeklySelectedUnits[key]++; refreshConfidenceUI(); };
+  removeBtn.onclick = () => { if (weeklySelectedUnits[key] > 0) weeklySelectedUnits[key]--; refreshConfidenceUI(); };
+  refreshConfidenceUI();
+
+  lockBtn.onclick = async () => {
+    try {
+      const units = weeklySelectedUnits[key];
+      errEl.textContent = '';
+      if (!units) { errEl.textContent = 'Pick 1, 2, or 3 flames.'; return; }
+      if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left in your bank this week.`; return; }
+      const pick = {
+        id: profile.name + '_weekly_' + opt.gameId + '_' + opt.betType + '_' + Date.now(),
+        player: profile.name, sport, gameId: opt.gameId,
+        gameLabel: game.away + ' @ ' + game.home,
+        betType: opt.betType, sideAbbr: opt.side, line: opt.line, units,
+        weekKey: wk, poolType: 'weekly',
+        timestamp: new Date().toISOString()
+      };
+      lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
+      allPicks.push(pick);
+      try {
+        await savePicks(allPicks);
+      } catch (saveErr) {
+        allPicks.pop();
+        lockBtn.disabled = false; lockBtn.textContent = `Lock: ${chipsFor(units)}`;
+        const msg = describeFetchError(saveErr);
+        errEl.textContent = "Couldn't save (" + msg + ") — try again.";
+        alert('Save failed: ' + msg);
+        return;
+      }
+      render();
+    } catch (outerErr) {
+      const msg = (outerErr && outerErr.message) ? outerErr.message : String(outerErr);
+      alert('Unexpected error locking this bet: ' + msg);
+      lockBtn.disabled = false;
+    }
+  };
   return card;
 }
 
@@ -846,16 +848,16 @@ function renderWeekFinalRecap(name, wk) {
   const net = weeklyNetUnits(name, wk);
   const board = weeklyLeaderboard(wk);
   const rank = board.findIndex(r => r.name === name) + 1;
-  const ratingBefore = whRating(name, wk);
-  const ratingAfter = ratingBefore + Math.round(net);
+  const totalBefore = totalUnitsWon(name) - net;
+  const totalAfter = totalBefore + net;
   card.innerHTML = `<div class="event-meta">Week final — ${weekRangeLabel(wk)}</div>
     <div style="text-align:center;margin:14px 0;">
       <div style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:${net >= 0 ? 'var(--accent)' : 'var(--danger)'};">${fmtUnits(net)}</div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Rank #${rank} of ${board.length} this week</div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
-      <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;">WH Rating</div>
-      <div style="font-family:var(--font-mono);font-weight:800;">${ratingBefore} → ${ratingAfter}</div>
+      <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;">Units won</div>
+      <div style="font-family:var(--font-mono);font-weight:800;">${fmtUnits(totalBefore)} → ${fmtUnits(totalAfter)}</div>
     </div>
     <div style="text-align:center;margin-top:12px;font-size:12px;color:var(--gold);font-weight:700;">${HOUSE_BANK_TOTAL} new house units available</div>`;
   return card;
@@ -885,22 +887,28 @@ function renderDailyChallenge() {
   const wk = houseWeekKey(new Date());
   const remaining = weeklyRemaining(profile.name, wk);
   const myBets = weeklyBetsFor(profile.name, wk);
-  const rating = whRating(profile.name);
+  const unitsWon = totalUnitsWon(profile.name);
+  const streak = positiveStreak(profile.name);
 
   const banner = el('div', 'rank-banner');
   const b1 = el('div', 'rank-cell');
-  b1.appendChild(el('div', 'rc-label', 'House bank'));
+  b1.appendChild(el('div', 'rc-label', 'House bet'));
   b1.appendChild(el('div', 'rc-value accent', remaining + ' / ' + HOUSE_BANK_TOTAL + 'u'));
   b1.appendChild(el('div', 'rc-sub', 'Resets Monday'));
   banner.appendChild(b1);
   const b2 = el('div', 'rank-cell');
-  b2.appendChild(el('div', 'rc-label', 'WH rating'));
-  b2.appendChild(el('div', 'rc-value', String(rating)));
-  b2.appendChild(el('div', 'rc-sub', 'Persists across weeks'));
+  b2.appendChild(el('div', 'rc-label', 'Units won'));
+  b2.appendChild(el('div', 'rc-value ' + (unitsWon >= 0 ? 'accent' : ''), fmtUnits(unitsWon)));
+  b2.appendChild(el('div', 'rc-sub', 'Running tally'));
   banner.appendChild(b2);
+  const b3 = el('div', 'rank-cell');
+  b3.appendChild(el('div', 'rc-label', 'Positive streak'));
+  b3.appendChild(el('div', 'rc-value ' + (streak > 0 ? 'accent' : ''), streak + (streak === 1 ? ' week' : ' weeks')));
+  b3.appendChild(el('div', 'rc-sub', 'Weeks in a row up'));
+  banner.appendChild(b3);
   wrap.appendChild(banner);
 
-  const historyToggle = el('button', null, dailyShowHistory ? '← Back to this week' : '📊 Past weeks');
+  const historyToggle = el('button', null, dailyShowHistory ? '← Back to this week' : 'Past weeks');
   historyToggle.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin:10px 0 4px;';
   historyToggle.onclick = () => { dailyShowHistory = !dailyShowHistory; render(); };
   wrap.appendChild(historyToggle);
@@ -923,29 +931,14 @@ function renderDailyChallenge() {
     wrap.appendChild(renderWeeklyBetsBar(myBets));
   }
 
-  const games = eligibleWeekGames();
-  const leaguesPresent = [...new Set(games.map(x => x.sport))];
-  if (leaguesPresent.length > 1) {
-    const scroller = el('div', 'league-scroller');
-    const allPill = el('button', 'league-pill' + (houseLeagueFilter === null ? ' active' : ''), 'All');
-    allPill.onclick = () => { houseLeagueFilter = null; render(); };
-    scroller.appendChild(allPill);
-    leaguesPresent.forEach(sport => {
-      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
-      const pill = el('button', 'league-pill' + (houseLeagueFilter === sport ? ' active' : ''), label);
-      pill.onclick = () => { houseLeagueFilter = sport; render(); };
-      scroller.appendChild(pill);
-    });
-    wrap.appendChild(scroller);
-  }
-  const filteredGames = houseLeagueFilter === null ? games : games.filter(x => x.sport === houseLeagueFilter);
-  wrap.appendChild(el('div', 'week-header', 'This week\'s games'));
-  if (!filteredGames.length) {
-    wrap.appendChild(el('div', 'empty', games.length ? 'No games in this league this week.' : 'No games with a posted line this week yet — check back soon.'));
+  const options = dailyRandomOptions();
+  wrap.appendChild(el('div', 'week-header', "Today's picks"));
+  if (!options) {
+    wrap.appendChild(el('div', 'empty', "Not enough games with posted lines today for a full slate of 10 — check back tomorrow."));
   } else {
-    filteredGames.forEach(({ sport, game }) => wrap.appendChild(renderWeekGameCard(sport, game, remaining)));
+    options.forEach(opt => wrap.appendChild(renderDailyOptionCard(opt, remaining)));
   }
-  wrap.appendChild(el('div', 'refresh-note', `100 house units a week. Up to ${HOUSE_BET_CAP}u (10 confidence points) on any one bet — straight spread or total, your call. Units lock once a game starts; whatever's left carries you through the rest of the week.`));
+  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a week, spread across a random daily slate of 10 picks. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts; whatever's left carries you through the rest of the week.`));
   return wrap;
 }
 
@@ -1546,8 +1539,124 @@ function renderGames() {
   return wrap;
 }
 
-function myPickFor(gameId, betType) {
-  return allPicks.find(p => p.gameId === gameId && p.player === profile.name && !p.poolType && (p.betType || 'spread') === betType);
+function myChallengeFor(gameId, betType) {
+  return allPicks.find(p => p.poolType === 'challenge' && p.creator === profile.name && p.gameId === gameId && p.betType === betType && p.status !== 'declined');
+}
+function challengeStatusText(ch) {
+  if (ch.status === 'open') return ch.visibility === 'public' ? 'Posted publicly — waiting for someone to accept' : `Sent to ${ch.targetFriend} — waiting for them to accept`;
+  if (ch.status === 'declined') return `${ch.targetFriend} declined this challenge`;
+  if (ch.status === 'accepted') {
+    const r = settlePick(ch);
+    if (r.status === 'pending') return `Accepted by ${ch.acceptedBy} — game not final yet`;
+    if (r.status === 'push') return `Accepted by ${ch.acceptedBy} — pushed, no units changed hands`;
+    const iWon = r.status === 'win';
+    return iWon ? `Accepted by ${ch.acceptedBy} — you won ${ch.units}u` : `Accepted by ${ch.acceptedBy} — you lost ${ch.units}u`;
+  }
+  return ch.status;
+}
+
+function renderChallengeRow(ch) {
+  const card = el('div', 'event-card');
+  const top = el('div');
+  top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+  top.innerHTML = `<span style="font-size:11px;color:var(--text-faint);">${ch.visibility === 'public' ? '\ud83d\udce2 Global' : '\ud83d\udc64 Friend'}</span><span style="font-size:11px;color:var(--text-faint);">${new Date(ch.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`;
+  card.appendChild(top);
+  card.appendChild(el('div', null, ch.gameLabel)).style.cssText = 'font-size:13.5px;font-weight:700;margin-bottom:4px;';
+  const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
+  const marketTxt = ch.betType === 'total' ? (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line : ch.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+  card.appendChild(el('div', null, `${ch.creator}'s pick: ${marketTxt} · ${ch.units}u`)).style.cssText = 'font-size:12.5px;color:var(--text-dim);margin-bottom:8px;';
+
+  if (ch.status === 'open') {
+    if (ch.creator === profile.name) {
+      card.appendChild(el('div', 'no-odds-note', ch.visibility === 'public' ? 'Posted publicly — waiting for someone to accept' : `Sent to ${ch.targetFriend} — waiting for a response`));
+    } else if (ch.visibility === 'friend' && ch.targetFriend === profile.name) {
+      const row = el('div'); row.style.cssText = 'display:flex;gap:8px;';
+      const acceptBtn = el('button', 'lock-btn', 'Accept'); acceptBtn.style.flex = '1';
+      acceptBtn.onclick = () => acceptChallenge(ch);
+      const declineBtn = el('button', null, 'Decline');
+      declineBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;padding:9px 14px;font-size:13px;';
+      declineBtn.onclick = () => declineChallenge(ch);
+      row.appendChild(acceptBtn); row.appendChild(declineBtn);
+      card.appendChild(row);
+    } else if (ch.visibility === 'public') {
+      const acceptBtn = el('button', 'lock-btn', 'Accept challenge');
+      acceptBtn.onclick = () => acceptChallenge(ch);
+      card.appendChild(acceptBtn);
+    } else {
+      card.appendChild(el('div', 'no-odds-note', 'Not visible to you'));
+    }
+  } else if (ch.status === 'declined') {
+    card.appendChild(el('div', 'no-odds-note', `${ch.targetFriend} declined this challenge`));
+  } else if (ch.status === 'accepted') {
+    const r = settlePick(ch);
+    const iAmCreator = ch.creator === profile.name;
+    const myOutcome = r.status === 'pending' ? 'pending' : r.status === 'push' ? 'push' : (iAmCreator ? r.status : (r.status === 'win' ? 'loss' : 'win'));
+    let txt, color;
+    if (myOutcome === 'pending') { txt = `Accepted by ${ch.acceptedBy} — game not final yet`; color = 'var(--gold)'; }
+    else if (myOutcome === 'push') { txt = 'Pushed — no units changed hands'; color = 'var(--gold)'; }
+    else {
+      const opponent = iAmCreator ? ch.acceptedBy : ch.creator;
+      txt = myOutcome === 'win' ? `You won ${ch.units}u vs ${opponent}` : `You lost ${ch.units}u vs ${opponent}`;
+      color = myOutcome === 'win' ? 'var(--accent)' : 'var(--danger)';
+    }
+    card.appendChild(el('div', null, txt)).style.cssText = `font-size:13px;font-weight:700;color:${color};`;
+  }
+  return card;
+}
+
+async function acceptChallenge(ch) {
+  const idx = allPicks.findIndex(p => p.id === ch.id);
+  if (idx === -1) return;
+  const prev = { ...allPicks[idx] };
+  allPicks[idx].status = 'accepted';
+  allPicks[idx].acceptedBy = profile.name;
+  try { await savePicks(allPicks); render(); }
+  catch (e) { allPicks[idx] = prev; alert("Couldn't accept (" + describeFetchError(e) + ") — try again."); render(); }
+}
+async function declineChallenge(ch) {
+  const idx = allPicks.findIndex(p => p.id === ch.id);
+  if (idx === -1) return;
+  const prev = { ...allPicks[idx] };
+  allPicks[idx].status = 'declined';
+  try { await savePicks(allPicks); render(); }
+  catch (e) { allPicks[idx] = prev; alert("Couldn't decline (" + describeFetchError(e) + ") — try again."); render(); }
+}
+
+function renderExistingChallenges() {
+  const wrap = el('div');
+  const toggle = el('div', 'league-scroller');
+  [['global','Global'],['friends','Friends']].forEach(([id,label]) => {
+    const pill = el('button', 'league-pill' + (existingChallengeView === id ? ' active' : ''), label);
+    pill.onclick = () => { existingChallengeView = id; render(); };
+    toggle.appendChild(pill);
+  });
+  wrap.appendChild(toggle);
+
+  const all = allPicks.filter(p => p.poolType === 'challenge');
+  const stillActive = ch => ch.status === 'open' || (ch.status === 'accepted' && settlePick(ch).status === 'pending');
+  let list;
+  if (existingChallengeView === 'global') {
+    list = all.filter(ch => ch.visibility === 'public' && stillActive(ch));
+  } else {
+    list = all.filter(ch => ch.visibility === 'friend' && (ch.creator === profile.name || ch.targetFriend === profile.name) && stillActive(ch));
+  }
+  list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  wrap.appendChild(el('div', 'week-header', existingChallengeView === 'global' ? 'Open global challenges' : 'Your friend challenges'));
+  if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
+  list.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
+  return wrap;
+}
+
+function renderCompletedChallenges() {
+  const wrap = el('div');
+  const mine = allPicks.filter(p => p.poolType === 'challenge' && (p.creator === profile.name || p.acceptedBy === profile.name || p.targetFriend === profile.name));
+  const completed = mine.filter(ch => ch.status === 'declined' || (ch.status === 'accepted' && settlePick(ch).status !== 'pending'));
+  completed.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  wrap.appendChild(el('div', 'week-header', 'Completed challenges'));
+  if (!completed.length) { wrap.appendChild(el('div', 'empty', 'No completed challenges yet.')); return wrap; }
+  completed.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
+  return wrap;
 }
 
 function renderGameCard(g, sport, meta) {
@@ -1578,11 +1687,11 @@ function renderGameCard(g, sport, meta) {
   }
 
   if (completed) {
-    card.appendChild(el('div', 'no-odds-note', 'Game already final — no pick placed'));
+    card.appendChild(el('div', 'no-odds-note', 'Game already final — no challenge possible'));
     return card;
   }
   if (inProgress) {
-    card.appendChild(el('div', 'no-odds-note', 'Game already in progress — betting closed'));
+    card.appendChild(el('div', 'no-odds-note', 'Game already in progress — challenges closed'));
     return card;
   }
 
@@ -1595,19 +1704,18 @@ function renderGameCard(g, sport, meta) {
     section.appendChild(el('div', null, label)).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;font-weight:700;margin-bottom:6px;';
     if (!hasMarket) { section.appendChild(el('div', 'no-odds-note', 'No ' + label.toLowerCase() + ' posted')); return section; }
 
-    const existingPick = myPickFor(g.id, betType);
-    if (existingPick) {
+    const existing = myChallengeFor(g.id, betType);
+    if (existing) {
       const note = el('div', 'locked-note');
-      const spreadTxt = betType === 'spread' ? pickSpreadDisplay(existingPick) : null;
-      const marketTxt = betType === 'total' ? (existingPick.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existingPick.line : existingPick.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
-      note.innerHTML = `<div class="ln-title">Your bet</div>${marketTxt} · <b>${existingPick.units}u</b> risked`;
+      const spreadTxt = betType === 'spread' ? pickSpreadDisplay(existing) : null;
+      const marketTxt = betType === 'total' ? (existing.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existing.line : existing.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+      note.innerHTML = `<div class="ln-title">Your challenge</div>${marketTxt} · <b>${existing.units}u</b><div style="margin-top:4px;font-size:11.5px;color:var(--text-dim);">${challengeStatusText(existing)}</div>`;
       section.appendChild(note);
       return section;
     }
 
     const key = g.id + '_' + betType;
     const grid = el('div', 'outcome-grid');
-    let lockBtn;
     sideOptions.forEach(opt => {
       const btn = el('div', 'outcome-btn' + (selectedSide[key] === opt.side ? ' selected' : ''));
       btn.innerHTML = `<div class="oc-team">${opt.team}</div><div class="oc-line">${opt.label}</div>`;
@@ -1615,8 +1723,7 @@ function renderGameCard(g, sport, meta) {
         selectedSide[key] = opt.side;
         grid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
-        lockBtn.disabled = false;
-        lockBtn.textContent = 'Lock pick: ' + opt.team;
+        createBtn.disabled = false;
       };
       grid.appendChild(btn);
     });
@@ -1628,31 +1735,40 @@ function renderGameCard(g, sport, meta) {
     const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = '1';
     bsRow.appendChild(unitsInput);
     slip.appendChild(bsRow);
-    lockBtn = el('button', 'lock-btn', 'Select a side');
-    lockBtn.disabled = true;
-    slip.appendChild(lockBtn);
+
+    const visSel = el('select');
+    visSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin:8px 0;box-sizing:border-box;';
+    const publicOpt = document.createElement('option'); publicOpt.value = ''; publicOpt.textContent = '\ud83d\udce2 Post publicly'; visSel.appendChild(publicOpt);
+    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 Send to ' + p; visSel.appendChild(o); });
+    slip.appendChild(visSel);
+
+    const createBtn = el('button', 'lock-btn', 'Select a side');
+    createBtn.disabled = true;
+    slip.appendChild(createBtn);
     const errEl = el('div', 'pick-error');
     slip.appendChild(errEl);
     section.appendChild(slip);
 
-    lockBtn.onclick = async () => {
+    createBtn.onclick = async () => {
       const side = selectedSide[key];
       const units = parseFloat(unitsInput.value);
       errEl.textContent = '';
       if (!side) { errEl.textContent = 'Pick a side first.'; return; }
       if (!units || units <= 0) { errEl.textContent = 'Enter a valid unit amount.'; return; }
-      const pick = {
-        id: profile.name + '_' + g.id + '_' + betType + '_' + Date.now(),
-        player: profile.name, sport, gameId: g.id,
-        gameLabel: g.away + ' @ ' + g.home,
+      const friend = visSel.value || null;
+      const challenge = {
+        id: profile.name + '_challenge_' + g.id + '_' + betType + '_' + Date.now(),
+        poolType: 'challenge', creator: profile.name,
+        sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
         betType, sideAbbr: side, units,
         line: betType === 'total' ? totalVal : (side === g.home ? spread : -spread),
         spreadLabel: betType === 'spread' ? spreadLabelForSide(sport, g, side) : null,
-        week: weekKey(new Date(g.start)), weekLabel: weekLabel(new Date(g.start)),
+        visibility: friend ? 'friend' : 'public',
+        targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
       };
-      lockBtn.disabled = true; lockBtn.textContent = 'Saving…';
-      allPicks.push(pick);
+      createBtn.disabled = true; createBtn.textContent = 'Saving…';
+      allPicks.push(challenge);
       let lastErr = null;
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -1663,12 +1779,13 @@ function renderGameCard(g, sport, meta) {
       }
       if (lastErr) {
         allPicks.pop();
-        lockBtn.disabled = false; lockBtn.textContent = 'Lock pick: ' + side;
+        createBtn.disabled = false; createBtn.textContent = friend ? 'Send to ' + friend : 'Post publicly';
         errEl.textContent = "Couldn't save (" + describeFetchError(lastErr) + ") — try again.";
       } else {
         render();
       }
     };
+    visSel.onchange = () => { createBtn.textContent = visSel.value ? 'Send to ' + visSel.value : 'Post publicly'; };
     return section;
   }
 
@@ -1734,7 +1851,7 @@ async function persistNewlySettledPicks() {
 }
 function potentialWin(p) { return p.units; }
 
-function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi'); }
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge'); }
 async function migrateLegacyWeeklyPicks() {
   let changed = false;
   allPicks.forEach(p => {
