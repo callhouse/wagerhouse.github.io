@@ -682,7 +682,7 @@ function renderTabs() {
   const bar = document.getElementById('tabbar');
   bar.innerHTML = '';
   if (!profile) return;
-  [['games','Make Challenge'],['existing','Existing Challenges'],['completed','Completed Challenges']].forEach(([id,label]) => {
+  [['games','Make Challenge'],['existing','Existing Challenges'],['completed','Accepted Challenges']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (activeTab === id ? ' active' : ''), label);
     t.onclick = () => { activeTab = id; render(); };
     bar.appendChild(t);
@@ -2310,7 +2310,7 @@ function renderExistingChallenges() {
       swipeCart = all.filter(ch => persistedCartIds.has(ch.id) && ch.status === 'open');
       const cartIds = new Set(swipeCart.map(c => c.id));
       const declinedIds = declinedChallengeIdsFor(profile.name);
-      swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id) && !declinedIds.has(ch.id));
+      swipeStack = list.filter(ch => ch.creator !== profile.name && ch.acceptedBy !== profile.name && !cartIds.has(ch.id) && !declinedIds.has(ch.id));
       swipeStackInitialized = true;
     }
     if (challengeBrowseMode === 'cart') { wrap.appendChild(renderSwipeCart()); return wrap; }
@@ -2337,7 +2337,9 @@ function myChallengeOutcome(ch) {
 function renderCompletedChallenges() {
   const wrap = el('div');
   const mine = allPicks.filter(p => p.poolType === 'challenge' && (p.creator === profile.name || p.acceptedBy === profile.name || p.targetFriend === profile.name));
+  const active = mine.filter(ch => ch.status === 'accepted' && settlePick(ch).status === 'pending');
   const completed = mine.filter(ch => ch.status === 'declined' || (ch.status === 'accepted' && settlePick(ch).status !== 'pending'));
+  active.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
   completed.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   const settledOnes = completed.map(ch => ({ ch, outcome: myChallengeOutcome(ch) })).filter(x => x.outcome !== null);
@@ -2363,7 +2365,11 @@ function renderCompletedChallenges() {
     wrap.appendChild(banner);
   }
 
-  wrap.appendChild(el('div', 'week-header', 'Completed challenges'));
+  wrap.appendChild(el('div', 'week-header', `Active (${active.length})`));
+  if (!active.length) { wrap.appendChild(el('div', 'empty', 'Nothing accepted and waiting on a result right now.')); }
+  else { active.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+
+  wrap.appendChild(el('div', 'week-header', `Completed (${completed.length})`));
   if (!completed.length) { wrap.appendChild(el('div', 'empty', 'No completed challenges yet.')); return wrap; }
   completed.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
   return wrap;
