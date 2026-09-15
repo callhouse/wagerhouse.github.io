@@ -788,6 +788,45 @@ function renderProfileScreen() {
     }
   };
 
+  const cleanupCard = el('div', 'setup-card');
+  cleanupCard.style.marginTop = '14px';
+  cleanupCard.appendChild(el('div', null, 'Clean up an old name')).style.cssText = 'font-size:14px;font-weight:800;margin-bottom:4px;';
+  cleanupCard.appendChild(el('div', 'setup-hint', "If you used this app before creating this account, type the name you typed back then and this will permanently delete everything you made under it — House Bet picks, tracked bets, and challenges you created."));
+  const oldNameInput = el('input'); oldNameInput.placeholder = 'e.g. the name you used before';
+  oldNameInput.style.marginTop = '8px';
+  cleanupCard.appendChild(oldNameInput);
+  const cleanupErr = el('div', 'pick-error');
+  const cleanupBtn = el('button', null, 'Delete everything from that name');
+  cleanupBtn.style.cssText = 'width:100%;margin-top:10px;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:10px;font-size:13px;font-weight:800;';
+  cleanupCard.appendChild(cleanupBtn);
+  cleanupCard.appendChild(cleanupErr);
+  wrap.appendChild(cleanupCard);
+
+  cleanupBtn.onclick = async () => {
+    const oldName = oldNameInput.value.trim();
+    cleanupErr.textContent = '';
+    if (!oldName) { cleanupErr.textContent = 'Enter the old name first.'; return; }
+    if (oldName === profile.name) { cleanupErr.textContent = "That's your current name — nothing to clean up."; return; }
+    const matchCount = allPicks.filter(p => p.player === oldName || p.creator === oldName).length;
+    if (!matchCount) { cleanupErr.textContent = `No data found under "${oldName}".`; return; }
+    if (!confirm(`Permanently delete ${matchCount} item${matchCount === 1 ? '' : 's'} made under "${oldName}"? This can't be undone.`)) return;
+    cleanupBtn.disabled = true; cleanupBtn.textContent = 'Deleting…';
+    const before = allPicks;
+    const beforePlayers = players;
+    allPicks = allPicks.filter(p => p.player !== oldName && p.creator !== oldName);
+    players = players.filter(p => p !== oldName);
+    try {
+      await savePicks(allPicks);
+      await savePlayers(players);
+      cleanupBtn.textContent = 'Deleted \u2713';
+      setTimeout(() => { cleanupBtn.disabled = false; cleanupBtn.textContent = 'Delete everything from that name'; oldNameInput.value = ''; render(); }, 1200);
+    } catch (e) {
+      allPicks = before; players = beforePlayers;
+      cleanupErr.textContent = "Couldn't delete (" + describeFetchError(e) + ") — try again.";
+      cleanupBtn.disabled = false; cleanupBtn.textContent = 'Delete everything from that name';
+    }
+  };
+
   return wrap;
 }
 
@@ -1999,7 +2038,25 @@ function renderChallengeRow(ch) {
     }
     card.appendChild(el('div', null, txt)).style.cssText = `font-size:13px;font-weight:700;color:${color};`;
   }
+
+  if (ch.creator === profile.name) {
+    const delBtn = el('button', null, '\u2715 Delete this challenge');
+    delBtn.style.cssText = 'width:100%;margin-top:8px;background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;padding:7px;font-size:11px;font-weight:700;';
+    delBtn.onclick = () => deleteChallenge(ch);
+    card.appendChild(delBtn);
+  }
   return card;
+}
+async function deleteChallenge(ch) {
+  const warn = ch.status === 'accepted'
+    ? `${ch.acceptedBy} has already accepted this challenge — deleting it will erase that too. Delete anyway?`
+    : 'Delete this challenge permanently?';
+  if (!confirm(warn)) return;
+  const idx = allPicks.findIndex(p => p.id === ch.id);
+  if (idx === -1) return;
+  const removed = allPicks.splice(idx, 1)[0];
+  try { await savePicks(allPicks); render(); }
+  catch (e) { allPicks.splice(idx, 0, removed); alert("Couldn't delete (" + describeFetchError(e) + ") — try again."); }
 }
 
 function generateHouseChallenges(limit) {
@@ -2102,7 +2159,7 @@ function renderSwipeCard(ch) {
     <div style="font-size:16px;font-weight:800;margin-bottom:2px;">${ch.gameLabel}</div>
     ${gTime ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">${gTime}</div>` : '<div style="margin-bottom:12px;"></div>'}
     <div style="font-size:24px;font-weight:800;color:var(--accent);margin-bottom:8px;">${marketTxt}</div>
-    <div style="font-size:14px;color:var(--text-dim);">${chipsFor(ch.units)} ${ch.units}u to win ${ch.units}u</div>
+    <div style="font-size:14px;color:var(--text-dim);">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
   `;
   const stampAccept = el('div', null, 'ACCEPT');
   stampAccept.style.cssText = 'position:absolute;top:20px;left:20px;border:3px solid var(--accent);color:var(--accent);padding:4px 12px;font-weight:900;font-size:18px;border-radius:6px;transform:rotate(-15deg);opacity:0;pointer-events:none;';
