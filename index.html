@@ -345,6 +345,7 @@ let acceptedChallengeLeague = null; // sport id or null
 let openChallengeLeague = null; // sport id or null
 let openChallengeDateFilter = 'week'; // 'today' | 'tomorrow' | 'week'
 let openChallengeTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'player' | 'golf'
+let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -802,7 +803,7 @@ function renderProfileScreen() {
   const unitSizeInput = el('input'); unitSizeInput.type = 'number'; unitSizeInput.min = '0'; unitSizeInput.step = '0.5';
   unitSizeInput.value = profile.unitSize || ''; unitSizeInput.placeholder = 'e.g. 5';
   card.appendChild(unitSizeInput);
-  card.appendChild(el('div', 'setup-hint', 'Set what one unit is worth in real dollars. When a challenge you\'re in settles, your Account balance automatically adjusts by units won or lost \u00d7 this amount. Bet slips still just show units.'));
+  card.appendChild(el('div', 'setup-hint', "Set what one unit is worth in real dollars. This does two things: your Account balance automatically adjusts by units won or lost \u00d7 this amount, and when you're about to accept someone else's challenge, the unit cost shown to you is converted to match their real-dollar stake exactly \u2014 so if their unit size is bigger or smaller than yours, you'll see a different unit number than they posted, not the same number at a different value."));
 
   const saveErr = el('div', 'pick-error');
   const saveBtn = el('button', 'lock-btn', 'Save changes');
@@ -2319,6 +2320,7 @@ function renderGolfSection() {
       sport: 'pga', gameLabel: field.tournamentName, tournamentId: field.tournamentId,
       playerA: selA.value, playerB: selB.value, sideAbbr: displaySide, units,
       oddsMultiplier,
+      creatorUnitSize: profile.unitSize || null,
       visibility: friend ? 'friend' : 'public',
       targetFriend: friend, status: 'open', acceptedBy: null,
       timestamp: new Date().toISOString()
@@ -2418,7 +2420,7 @@ function renderChallengeRow(ch) {
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   const marketTxt = challengeMarketTxt(ch);
   const isMine = ch.creator === profile.name;
-  const slipLabel = isMine ? `You're offering: ${marketTxt} · ${ch.units}u` : `Take: ${marketTxt} · ${ch.units}u`;
+  const slipLabel = isMine ? `You're offering: ${marketTxt} · ${ch.units}u` : `Take: ${marketTxt} · ${displayUnitsFor(ch)}u`;
   card.appendChild(el('div', null, slipLabel)).style.cssText = 'font-size:12.5px;color:var(--text-dim);margin-bottom:8px;';
 
   if (ch.status === 'open') {
@@ -2612,10 +2614,13 @@ function renderSwipeCard(ch) {
 
   const bottom = el('div');
   bottom.style.cssText = 'text-align:center;';
+  const displayUnits = displayUnitsFor(ch);
+  const wasConverted = ch.status === 'open' && ch.creatorUnitSize && profile.unitSize && displayUnits !== ch.units;
   bottom.innerHTML = `
     <div style="font-size:10.5px;color:#5a5342;text-transform:uppercase;font-weight:800;letter-spacing:0.03em;margin-bottom:3px;">If you accept, you get</div>
     <div style="font-size:23px;font-weight:800;color:#C1501F;margin-bottom:6px;">${marketTxt}</div>
-    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(ch.units)} ${ch.units} ${ch.units === 1 ? 'Unit' : 'Units'}</div>
+    <div style="font-size:13px;color:#3a3528;font-weight:600;">${chipsFor(displayUnits)} ${displayUnits} ${displayUnits === 1 ? 'Unit' : 'Units'}</div>
+    ${wasConverted ? `<div style="font-size:10px;color:#8a8168;margin-top:3px;">(matches ${ch.creator}'s ${ch.units}${ch.units === 1 ? 'u' : 'u'} stake in real dollars)</div>` : ''}
   `;
   card.appendChild(bottom);
 
@@ -2721,7 +2726,7 @@ function renderSwipeCart() {
   wrap.appendChild(el('div', 'week-header', `Your cart (${swipeCart.length})`));
   if (!swipeCart.length) { wrap.appendChild(el('div', 'empty', 'No accepted challenges yet — swipe right on some first.')); return wrap; }
 
-  const cartTotalUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
+  const cartTotalUnits = swipeCart.reduce((s,ch) => s + convertedUnitsForViewer(ch), 0);
   const banner = el('div', 'rank-banner');
   const c1 = el('div', 'rank-cell');
   c1.appendChild(el('div', 'rc-label', 'Total challenges'));
@@ -2733,7 +2738,7 @@ function renderSwipeCart() {
   banner.appendChild(c2);
   wrap.appendChild(banner);
 
-  const sortedCart = swipeCart.slice().sort((a,b) => b.units - a.units);
+  const sortedCart = swipeCart.slice().sort((a,b) => convertedUnitsForViewer(b) - convertedUnitsForViewer(a));
   sortedCart.forEach((ch) => {
     const row = el('div', 'pick-row');
     const left = el('div');
@@ -2742,7 +2747,7 @@ function renderSwipeCart() {
     left.appendChild(el('div', 'who', fullGameLabel(ch)));
     const gTime = gameTimeLabel(ch.gameId);
     if (gTime) left.appendChild(el('div', 'detail', gTime));
-    left.appendChild(el('div', 'detail', `${marketTxt} · ${ch.units}u`));
+    left.appendChild(el('div', 'detail', `${marketTxt} · ${convertedUnitsForViewer(ch)}u`));
     left.appendChild(el('div', 'detail', `From ${ch.creator}`));
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
@@ -2752,7 +2757,7 @@ function renderSwipeCart() {
     wrap.appendChild(row);
   });
 
-  const totalCartUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
+  const totalCartUnits = swipeCart.reduce((s,ch) => s + convertedUnitsForViewer(ch), 0);
   const confirmLabel = (n, u) => {
     const base = `Confirm ${n} Challenge${n === 1 ? '' : 's'}`;
     if (profile.unitSize) return `${base} (Cost = $${(u * profile.unitSize).toFixed(2)})`;
@@ -2766,7 +2771,7 @@ function renderSwipeCart() {
     const snapshotUnits = totalCartUnits;
     snapshot.forEach(ch => {
       const idx = allPicks.findIndex(p => p.id === ch.id);
-      if (idx > -1) { allPicks[idx].status = 'accepted'; allPicks[idx].acceptedBy = profile.name; }
+      if (idx > -1) { allPicks[idx].status = 'accepted'; allPicks[idx].acceptedBy = profile.name; allPicks[idx].acceptorUnits = convertedUnitsForViewer(ch); }
     });
     const cartMarkerIdxs = snapshot.map(ch => allPicks.findIndex(p => p.poolType === 'swipeCartItem' && p.player === profile.name && p.challengeId === ch.id)).filter(i => i > -1);
     const removedMarkers = cartMarkerIdxs.sort((a,b) => b - a).map(i => allPicks.splice(i, 1)[0]);
@@ -2839,6 +2844,13 @@ function renderExistingChallenges() {
     typeScroller.appendChild(pill);
   });
 
+  const maxUnitsScroller = el('div', 'league-scroller');
+  [[null,'Any size'],[1,'\u2264 1u'],[3,'\u2264 3u'],[5,'\u2264 5u'],[10,'\u2264 10u']].forEach(([val,label]) => {
+    const pill = el('button', 'league-pill' + (openChallengeMaxUnits === val ? ' active' : ''), label);
+    pill.onclick = () => { openChallengeMaxUnits = val; swipeStackInitialized = false; render(); };
+    maxUnitsScroller.appendChild(pill);
+  });
+
   const byLeague = openChallengeLeague === null ? byView : byView.filter(ch => ch.sport === openChallengeLeague);
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -2856,12 +2868,13 @@ function renderExistingChallenges() {
     const weekEnd = new Date(startOfToday); weekEnd.setDate(weekEnd.getDate() + 7);
     return gd >= startOfToday && gd < weekEnd;
   });
-  const list = openChallengeTypeFilter === 'all' ? byDate : byDate.filter(ch => {
+  const byType = openChallengeTypeFilter === 'all' ? byDate : byDate.filter(ch => {
     if (openChallengeTypeFilter === 'player') return ch.propType === 'player';
     if (openChallengeTypeFilter === 'moneyline') return ch.propType === 'golf_h2h' || ch.betType === 'moneyline' || (ch.betType === 'spread' && !ch.propType && !ch.spreadLabel);
     if (openChallengeTypeFilter === 'spread') return !ch.propType && ch.betType === 'spread' && !!ch.spreadLabel;
     return !ch.propType && ch.betType === openChallengeTypeFilter;
   });
+  const list = openChallengeMaxUnits === null ? byType : byType.filter(ch => displayUnitsFor(ch) <= openChallengeMaxUnits);
   list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   if (existingChallengeView === 'global') {
@@ -2876,7 +2889,7 @@ function renderExistingChallenges() {
     if (challengeBrowseMode === 'cart') {
       return renderSwipeCart();
     }
-    return renderSwipeMode([toggle, leagueScroller, dateScroller, typeScroller]);
+    return renderSwipeMode([toggle, leagueScroller, dateScroller, typeScroller, maxUnitsScroller]);
   }
 
   const wrap = el('div');
@@ -2884,6 +2897,7 @@ function renderExistingChallenges() {
   if (leagueScroller) wrap.appendChild(leagueScroller);
   wrap.appendChild(dateScroller);
   wrap.appendChild(typeScroller);
+  wrap.appendChild(maxUnitsScroller);
   const headerText = existingChallengeView === 'friends' ? 'Your friend challenges' : 'Bets you\'ve posted';
   wrap.appendChild(el('div', 'week-header', headerText));
   if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
@@ -2901,6 +2915,19 @@ function myChallengeOutcome(ch) {
   if (r.status === 'win') return iAmCreator ? 'loss' : 'win';
   return iAmCreator ? 'win' : 'loss';
 }
+function convertedUnitsForViewer(ch) {
+  // What it would actually cost the current viewer to accept this, preserving real-dollar equivalence with
+  // what the creator staked. Falls back to the raw unit count if either side hasn't set a unit size — there's
+  // no dollar basis to convert from/to in that case, so we can't do better than showing the number as posted.
+  if (!ch.creatorUnitSize || !profile.unitSize) return ch.units;
+  return Math.round((ch.units * ch.creatorUnitSize / profile.unitSize) * 100) / 100;
+}
+function displayUnitsFor(ch) {
+  const iAmCreator = ch.creator === profile.name;
+  if (iAmCreator) return ch.units;
+  if (ch.status === 'accepted') return ch.acceptorUnits != null ? ch.acceptorUnits : ch.units;
+  return convertedUnitsForViewer(ch); // still open — show what it would actually cost me to accept
+}
 function computeChallengeProfit(ch, iAmCreator) {
   const r = settlePick(ch);
   if (r.status === 'pending') return null;
@@ -2908,8 +2935,9 @@ function computeChallengeProfit(ch, iAmCreator) {
   const offeredSideWon = r.status === 'win';
   const iWin = iAmCreator ? !offeredSideWon : offeredSideWon;
   const mult = ch.oddsMultiplier || 1;
-  if (iWin) return iAmCreator ? ch.units : ch.units * mult;
-  return -ch.units;
+  const myStake = iAmCreator ? ch.units : (ch.acceptorUnits != null ? ch.acceptorUnits : ch.units);
+  if (iWin) return iAmCreator ? myStake : myStake * mult;
+  return -myStake;
 }
 
 function renderCompletedChallenges() {
@@ -2943,7 +2971,7 @@ function renderCompletedChallenges() {
   const losses = settledOnes.filter(x => x.outcome === 'loss').length;
   const unitsWonChallenges = settledOnes.reduce((s,x) => s + (computeChallengeProfit(x.ch, x.ch.creator === profile.name) || 0), 0);
   const winPct = (wins + losses) > 0 ? (wins / (wins + losses) * 100) : 0;
-  const pendingUnits = active.reduce((s,ch) => s + ch.units, 0);
+  const pendingUnits = active.reduce((s,ch) => s + displayUnitsFor(ch), 0);
 
   const banner = el('div', 'rank-banner');
   banner.style.marginTop = '5px';
@@ -3169,6 +3197,7 @@ function renderGameCard(g, sport, meta) {
         sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
         betType, sideAbbr: displaySide, units, line, spreadLabel,
         oddsMultiplier: (betType === 'spread' || betType === 'moneyline') ? oddsMultiplier : 1,
+        creatorUnitSize: profile.unitSize || null,
         visibility: friend ? 'friend' : 'public',
         targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
@@ -3285,6 +3314,7 @@ function renderGameCard(g, sport, meta) {
         poolType: 'challenge', propType: 'player', creator: profile.name,
         sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
         playerName, statCategory: catSel.value, sideAbbr: displaySide, line, units,
+        creatorUnitSize: profile.unitSize || null,
         visibility: friend ? 'friend' : 'public',
         targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
