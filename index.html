@@ -3486,7 +3486,7 @@ function renderGameCard(g, sport, meta) {
   const homeWon = completed && homeScore > awayScore;
   const awayWon = completed && awayScore > homeScore;
 
-  if (minimizedGameCards[g.id]) {
+  if (minimizedGameCards[g.id] !== false) {
     const mini = el('div', 'event-card');
     mini.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;';
     const label = el('span', null, `${(meta.label || sport.toUpperCase())} \u2013 ${g.away} @ ${g.home}`);
