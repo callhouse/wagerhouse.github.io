@@ -2699,7 +2699,7 @@ function renderSwipeMode(extraRows) {
 function renderSwipeCart() {
   const wrap = el('div');
   const backBtn = el('button', null, '\u2190 Back to swiping');
-  backBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin-bottom:10px;margin-top:5px;';
+  backBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin-bottom:0px;margin-top:5px;';
   backBtn.onclick = () => { challengeBrowseMode = 'swipe'; render(); };
   wrap.appendChild(backBtn);
 
@@ -2928,6 +2928,7 @@ function renderCompletedChallenges() {
   const losses = settledOnes.filter(x => x.outcome === 'loss').length;
   const unitsWonChallenges = settledOnes.reduce((s,x) => s + (computeChallengeProfit(x.ch, x.ch.creator === profile.name) || 0), 0);
   const winPct = (wins + losses) > 0 ? (wins / (wins + losses) * 100) : 0;
+  const pendingUnits = active.reduce((s,ch) => s + ch.units, 0);
 
   const banner = el('div', 'rank-banner');
   banner.style.marginTop = '5px';
@@ -2943,6 +2944,10 @@ function renderCompletedChallenges() {
   c3.appendChild(el('div', 'rc-label', 'Win %'));
   c3.appendChild(el('div', 'rc-value', winPct.toFixed(0) + '%'));
   banner.appendChild(c3);
+  const c4 = el('div', 'rank-cell');
+  c4.appendChild(el('div', 'rc-label', 'Pending units'));
+  c4.appendChild(el('div', 'rc-value', String(pendingUnits)));
+  banner.appendChild(c4);
   wrap.appendChild(banner);
 
   const activeHeader = el('div', 'week-header', `${activeChallengesOpen ? '\u25be' : '\u25b8'} Active (${active.length})`);
