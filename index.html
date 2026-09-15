@@ -516,7 +516,11 @@ async function authSignUp(username, password) {
   return json;
 }
 async function authSignIn(username, password) {
-  const email = usernameToEmail(username);
+  let email = usernameToEmail(username);
+  try {
+    const p = await findProfileByUsername(username);
+    if (p && p.authEmail) email = p.authEmail;
+  } catch (e) { /* fall back to the synthetic email below */ }
   const res = await fetch(AUTH_SIGNIN_URL, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, returnSecureToken: true })
@@ -532,6 +536,24 @@ async function authChangePassword(idToken, newPassword) {
   });
   const json = await res.json();
   if (!res.ok) throw new Error((json.error && json.error.message) || 'Could not change password');
+  return json;
+}
+async function authUpdateEmail(idToken, newEmail) {
+  const res = await fetch(AUTH_UPDATE_URL, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken, email: newEmail, returnSecureToken: true })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error((json.error && json.error.message) || 'Could not update email');
+  return json;
+}
+async function authSendPasswordReset(email) {
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${firebaseConfig.apiKey}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestType: 'PASSWORD_RESET', email })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error((json.error && json.error.message) || 'Could not send reset email');
   return json;
 }
 async function authRefresh(refreshToken) {
@@ -596,11 +618,21 @@ async function fetchAllProfiles(forceRefresh) {
     const list = (json.documents || []).map(doc => {
       const uid = doc.name.split('/').pop();
       const fields = fromFsFields(doc.fields);
-      return { uid, name: fields.name, username: fields.username, venmo: fields.venmo };
+      return { uid, name: fields.name, username: fields.username, venmo: fields.venmo, email: fields.email || null, authEmail: fields.authEmail || null };
     }).filter(p => p.name && p.username);
     allProfilesCache = list;
     return list;
   } catch (e) { return allProfilesCache || []; }
+}
+async function findProfileByUsername(username) {
+  const list = await fetchAllProfiles(true);
+  const norm = username.trim().toLowerCase();
+  return list.find(p => (p.username || '').toLowerCase() === norm) || null;
+}
+async function findProfileByEmail(email) {
+  const list = await fetchAllProfiles(true);
+  const norm = email.trim().toLowerCase();
+  return list.find(p => (p.email || '').toLowerCase() === norm) || null;
 }
 
 // ---------- storage ----------
@@ -841,6 +873,11 @@ function renderProfileScreen() {
   const venmoInput = el('input'); venmoInput.value = profile.venmo || ''; venmoInput.placeholder = 'e.g. @jordan-smith';
   card.appendChild(venmoInput);
 
+  card.appendChild(el('label', null, 'Email (for password recovery)'));
+  const emailInput = el('input'); emailInput.type = 'email'; emailInput.value = profile.email || ''; emailInput.placeholder = 'e.g. jordan@email.com';
+  card.appendChild(emailInput);
+  card.appendChild(el('div', 'setup-hint', "Needed for \"Forgot username or password\" at login. Adding or changing this updates your real recovery email."));
+
   card.appendChild(el('label', null, 'Unit size ($)'));
   const unitSizeInput = el('input'); unitSizeInput.type = 'number'; unitSizeInput.min = '0'; unitSizeInput.step = '0.5';
   unitSizeInput.value = profile.unitSize || ''; unitSizeInput.placeholder = 'e.g. 5';
@@ -860,11 +897,23 @@ function renderProfileScreen() {
     saveErr.textContent = '';
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     const venmo = venmoInput.value.trim() || null;
+    const email = emailInput.value.trim() || null;
     const unitSize = unitSizeInput.value ? parseFloat(unitSizeInput.value) : null;
     const oldName = profile.name;
     try {
-      await saveProfileDoc(profile.uid, { name, venmo, unitSize });
-      saveProfile({ ...profile, name, venmo, unitSize });
+      const updates = { name, venmo, unitSize, email };
+      if (email && email !== profile.email) {
+        try {
+          await ensureFreshSession();
+          const updated = await authUpdateEmail(session.idToken, email);
+          saveSession({ idToken: updated.idToken, refreshToken: updated.refreshToken, uid: session.uid, expiresAt: Date.now() + parseInt(updated.expiresIn, 10) * 1000 });
+          updates.authEmail = email;
+        } catch (e) {
+          saveErr.textContent = "Couldn't update recovery email (" + describeAuthError(e) + ") — other changes will still save.";
+        }
+      }
+      await saveProfileDoc(profile.uid, updates);
+      saveProfile({ ...profile, ...updates });
       if (name !== oldName && !players.includes(name)) { players.push(name); await savePlayers(players); }
       render();
     } catch (e) {
@@ -1139,11 +1188,12 @@ function renderFriendsScreen() {
 }
 
 function renderSetup() {
+  if (authMode === 'recover') return renderRecoverScreen();
   const wrap = el('div');
   const card = el('div', 'setup-card');
   card.appendChild(el('div', null, authMode === 'login' ? 'Log in' : 'Create account')).style.cssText = 'font-size:16px;font-weight:800;margin-bottom:4px;';
 
-  let nameInput, venmoInput;
+  let nameInput, venmoInput, emailInput;
   if (authMode === 'signup') {
     card.appendChild(el('label', null, 'Your name'));
     nameInput = el('input'); nameInput.placeholder = 'e.g. Jordan';
@@ -1155,6 +1205,9 @@ function renderSetup() {
   card.appendChild(userInput);
 
   if (authMode === 'signup') {
+    card.appendChild(el('label', null, 'Email (for password recovery)'));
+    emailInput = el('input'); emailInput.type = 'email'; emailInput.placeholder = 'e.g. jordan@email.com'; emailInput.autocomplete = 'email';
+    card.appendChild(emailInput);
     card.appendChild(el('label', null, 'Venmo name (optional)'));
     venmoInput = el('input'); venmoInput.placeholder = 'e.g. @jordan-smith';
     card.appendChild(venmoInput);
@@ -1176,6 +1229,13 @@ function renderSetup() {
   switchLink.onclick = () => { authMode = authMode === 'login' ? 'signup' : 'login'; setupError = ''; render(); };
   card.appendChild(switchLink);
 
+  if (authMode === 'login') {
+    const forgotLink = el('div', null, 'Forgot username or password?');
+    forgotLink.style.cssText = 'text-align:center;margin-top:8px;font-size:12px;color:var(--text-faint);font-weight:700;';
+    forgotLink.onclick = () => { authMode = 'recover'; setupError = ''; render(); };
+    card.appendChild(forgotLink);
+  }
+
   card.appendChild(el('div', 'setup-hint', 'Everyone using this app shares one global leaderboard.'));
   wrap.appendChild(card);
 
@@ -1190,17 +1250,26 @@ function renderSetup() {
       if (authMode === 'signup') {
         const name = nameInput.value.trim();
         if (!name) { setupError = 'Enter your name.'; goBtn.disabled = false; goBtn.textContent = 'Create account'; render(); return; }
+        const email = emailInput.value.trim() || null;
         const auth = await authSignUp(username, password);
         saveSession({ idToken: auth.idToken, refreshToken: auth.refreshToken, uid: auth.localId, expiresAt: Date.now() + parseInt(auth.expiresIn, 10) * 1000 });
+        let authEmail = auth.email; // the synthetic username-based email, unless we swap it below
+        if (email) {
+          try {
+            const updated = await authUpdateEmail(auth.idToken, email);
+            authEmail = email;
+            saveSession({ idToken: updated.idToken, refreshToken: updated.refreshToken, uid: auth.localId, expiresAt: Date.now() + parseInt(updated.expiresIn, 10) * 1000 });
+          } catch (e) { /* real email update failed (e.g. already in use elsewhere) — keep the synthetic one, account still works */ }
+        }
         const venmo = venmoInput.value.trim() || null;
-        await saveProfileDoc(auth.localId, { name, username, venmo });
-        saveProfile({ name, username, venmo, uid: auth.localId });
+        await saveProfileDoc(auth.localId, { name, username, venmo, email, authEmail });
+        saveProfile({ name, username, venmo, email, uid: auth.localId });
       } else {
         const auth = await authSignIn(username, password);
         saveSession({ idToken: auth.idToken, refreshToken: auth.refreshToken, uid: auth.localId, expiresAt: Date.now() + parseInt(auth.expiresIn, 10) * 1000 });
         const doc = await fetchProfileDoc(auth.localId);
         if (!doc) throw new Error('Profile data missing for this account.');
-        saveProfile({ name: doc.name, username: doc.username, venmo: doc.venmo, uid: auth.localId });
+        saveProfile({ name: doc.name, username: doc.username, venmo: doc.venmo, email: doc.email || null, unitSize: doc.unitSize || null, friends: doc.friends || [], uid: auth.localId });
       }
       await completeLoginSetup();
     } catch (e) {
@@ -1208,6 +1277,60 @@ function renderSetup() {
       setupError = describeAuthError(e);
       goBtn.disabled = false; goBtn.textContent = authMode === 'login' ? 'Log in' : 'Create account';
       render();
+    }
+  };
+  return wrap;
+}
+
+function renderRecoverScreen() {
+  const wrap = el('div');
+  const card = el('div', 'setup-card');
+  card.appendChild(el('div', null, 'Recover your account')).style.cssText = 'font-size:16px;font-weight:800;margin-bottom:4px;';
+  card.appendChild(el('div', 'setup-hint', 'Only works if you added a recovery email when you signed up.'));
+
+  card.appendChild(el('label', null, 'Your username or email'));
+  const input = el('input'); input.placeholder = 'e.g. jordan99 or jordan@email.com'; input.autocapitalize = 'none';
+  card.appendChild(input);
+
+  const btnRow = el('div', 'btn-row');
+  const goBtn = el('button', null, 'Send reset link');
+  btnRow.appendChild(goBtn);
+  card.appendChild(btnRow);
+
+  const resultEl = el('div', 'setup-hint');
+  card.appendChild(resultEl);
+
+  const backLink = el('div', null, '\u2190 Back to log in');
+  backLink.style.cssText = 'text-align:center;margin-top:12px;font-size:12.5px;color:var(--accent);font-weight:700;';
+  backLink.onclick = () => { authMode = 'login'; setupError = ''; render(); };
+  card.appendChild(backLink);
+  wrap.appendChild(card);
+
+  goBtn.onclick = async () => {
+    const query = input.value.trim();
+    resultEl.textContent = '';
+    if (!query) { input.style.borderColor = 'var(--danger)'; return; }
+    goBtn.disabled = true; goBtn.textContent = 'Looking up…';
+    try {
+      let profileMatch = null;
+      if (query.includes('@')) {
+        profileMatch = await findProfileByEmail(query);
+      } else {
+        profileMatch = await findProfileByUsername(query);
+      }
+      const email = profileMatch && (profileMatch.authEmail || profileMatch.email);
+      if (email && email.indexOf('@units-app.local') === -1) {
+        await authSendPasswordReset(email);
+        resultEl.textContent = `If that matches an account, a reset link was sent. Your username is "${profileMatch.username}" — good to know for next time.`;
+      } else if (profileMatch) {
+        resultEl.textContent = `We found the account "${profileMatch.username}", but it has no recovery email on file, so we can't send a reset link. You'll need help from whoever manages this app.`;
+      } else {
+        resultEl.textContent = "If that matches an account with a recovery email, a reset link was sent.";
+      }
+      goBtn.disabled = false; goBtn.textContent = 'Send reset link';
+    } catch (e) {
+      resultEl.textContent = "Couldn't process that (" + describeFetchError(e) + ") — try again.";
+      goBtn.disabled = false; goBtn.textContent = 'Send reset link';
     }
   };
   return wrap;
@@ -3010,11 +3133,11 @@ function renderExistingChallenges() {
   maxUnitsScroller.appendChild(minLabel);
   const minInput = el('input'); minInput.type = 'number'; minInput.min = '0'; minInput.step = '0.5'; minInput.placeholder = 'No min'; minInput.id = 'openChallengeMinUnitsInput';
   minInput.value = openChallengeMinUnits === null ? '' : openChallengeMinUnits;
-  minInput.style.cssText = 'flex:0 0 auto;width:80px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 6px;font-size:12px;box-sizing:border-box;';
+  minInput.style.cssText = 'flex:0 0 auto;width:65px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 6px;font-size:12px;box-sizing:border-box;';
   const toLabel = el('span', null, 'to'); toLabel.style.cssText = 'font-size:11px;color:var(--text-faint);flex-shrink:0;';
   const maxInput = el('input'); maxInput.type = 'number'; maxInput.min = '0'; maxInput.step = '0.5'; maxInput.placeholder = 'No max'; maxInput.id = 'openChallengeMaxUnitsInput';
   maxInput.value = openChallengeMaxUnits === null ? '' : openChallengeMaxUnits;
-  maxInput.style.cssText = 'flex:0 0 auto;width:80px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 6px;font-size:12px;box-sizing:border-box;';
+  maxInput.style.cssText = 'flex:0 0 auto;width:65px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 6px;font-size:12px;box-sizing:border-box;';
   minInput.addEventListener('input', () => {
     openChallengeMinUnits = minInput.value === '' ? null : parseFloat(minInput.value);
     swipeStackInitialized = false;
