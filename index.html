@@ -34,7 +34,7 @@
   .menu-dropdown .menu-item.danger { color: var(--danger); }
   .menu-dropdown .menu-item .sub { display: block; font-size: 11px; color: var(--text-faint); font-weight: 500; margin-top: 2px; }
   .swipe-card-big { display: flex; flex-direction: column; justify-content: center; overflow-y: auto; overflow-x: hidden; max-width: 100%; width: 100%; flex: 1; min-height: 0; box-sizing: border-box; }
-  .swipe-team-logo { width: 40px; height: 40px; object-fit: contain; }
+  .swipe-team-logo { width: 80px; height: 80px; object-fit: contain; }
   .swipe-fixed-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 25; box-sizing: border-box; }
   .swipe-bar-spacer { height: 76px; }
 
@@ -2345,7 +2345,7 @@ function renderSwipeCard(ch) {
   const cardWrap = el('div');
   cardWrap.style.cssText = 'position:relative;touch-action:pan-y;user-select:none;display:flex;flex-direction:column;';
   const card = el('div', 'swipe-card-big');
-  card.style.cssText = 'padding:16px;cursor:grab;border-radius:14px;background:#F5F1E6;border:1px solid #D9D0BC;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
+  card.style.cssText = 'padding:16px;cursor:grab;border-radius:14px;background:#E3D2A6;border:1px solid #C9B482;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
   const marketTxt = challengeMarketTxt(ch);
   const leagueLabel = (LEAGUES_META.find(l => l.id === ch.sport) || {}).label || (ch.sport || 'sport').toUpperCase();
   const gTime = gameTimeLabel(ch.gameId);
