@@ -810,7 +810,7 @@ function renderSectionSwitch() {
   const bar = document.getElementById('sectionSwitch');
   bar.innerHTML = '';
   if (!profile) return;
-  [['daily','House Bet'],['pools','Challenge'],['kalshi','3rd Party']].forEach(([id,label]) => {
+  [['daily','House Bet'],['pools','Challenges'],['kalshi','3rd Party']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (appSection === id ? ' active' : ''), label);
     t.onclick = () => { appSection = id; render(); };
     bar.appendChild(t);
@@ -821,7 +821,7 @@ function renderTabs() {
   const bar = document.getElementById('tabbar');
   bar.innerHTML = '';
   if (!profile) return;
-  [['games','Make Challenge'],['existing','Open Challenges'],['completed','Accepted Challenges']].forEach(([id,label]) => {
+  [['games','Create'],['existing','Open'],['completed','Accepted']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (activeTab === id ? ' active' : ''), label);
     t.onclick = () => { activeTab = id; render(); };
     bar.appendChild(t);
