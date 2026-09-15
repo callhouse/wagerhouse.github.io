@@ -2746,6 +2746,7 @@ function renderCompletedChallenges() {
   const winPct = (wins + losses) > 0 ? (wins / (wins + losses) * 100) : 0;
 
   const banner = el('div', 'rank-banner');
+  banner.style.marginTop = '10px';
   const c1 = el('div', 'rank-cell');
   c1.appendChild(el('div', 'rc-label', 'Total challenges'));
   c1.appendChild(el('div', 'rc-value', String(settledOnes.length)));
