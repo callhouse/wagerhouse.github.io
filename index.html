@@ -351,6 +351,7 @@ let openChallengeLeague = null; // sport id or null
 let openChallengeDateFilter = 'week'; // 'today' | 'tomorrow' | 'week'
 let openChallengeTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'player' | 'golf'
 let openChallengeMinUnits = null; // null = no floor
+let unitFilterDebounce = null;
 let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
@@ -2301,7 +2302,8 @@ function renderGames() {
     wrap.appendChild(warn);
   }
   const scroller = el('div', 'league-scroller');
-  LEAGUES_META.forEach(lg => {
+  const orderedLeagues = LEAGUES_META.slice().sort((a, b) => (a.active === b.active) ? 0 : (a.active ? -1 : 1));
+  orderedLeagues.forEach(lg => {
     const pill = el('button', 'league-pill' + (lg.id === activeSport ? ' active' : '') + (!lg.active ? ' off' : ''), lg.label);
     pill.onclick = () => { activeSport = lg.id; render(); };
     scroller.appendChild(pill);
@@ -3000,8 +3002,20 @@ function renderExistingChallenges() {
   const maxInput = el('input'); maxInput.type = 'number'; maxInput.min = '0'; maxInput.step = '0.5'; maxInput.placeholder = 'No max';
   maxInput.value = openChallengeMaxUnits === null ? '' : openChallengeMaxUnits;
   maxInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;';
-  minInput.addEventListener('input', () => { openChallengeMinUnits = minInput.value === '' ? null : parseFloat(minInput.value); swipeStackInitialized = false; render(); });
-  maxInput.addEventListener('input', () => { openChallengeMaxUnits = maxInput.value === '' ? null : parseFloat(maxInput.value); swipeStackInitialized = false; render(); });
+  minInput.addEventListener('input', () => {
+    openChallengeMinUnits = minInput.value === '' ? null : parseFloat(minInput.value);
+    swipeStackInitialized = false;
+    clearTimeout(unitFilterDebounce);
+    unitFilterDebounce = setTimeout(() => render(), 500);
+  });
+  minInput.addEventListener('blur', () => { clearTimeout(unitFilterDebounce); render(); });
+  maxInput.addEventListener('input', () => {
+    openChallengeMaxUnits = maxInput.value === '' ? null : parseFloat(maxInput.value);
+    swipeStackInitialized = false;
+    clearTimeout(unitFilterDebounce);
+    unitFilterDebounce = setTimeout(() => render(), 500);
+  });
+  maxInput.addEventListener('blur', () => { clearTimeout(unitFilterDebounce); render(); });
   maxUnitsScroller.appendChild(minInput);
   maxUnitsScroller.appendChild(toLabel);
   maxUnitsScroller.appendChild(maxInput);
