@@ -289,7 +289,7 @@ async function refreshGameLists() {
 
 let liveTimer = null;
 function startLiveScoreChecks() {
-  refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); await persistNewlySettledPlayerProps(); await persistNewlySettledGolfH2H(); if (profile) render(); });
+  refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); await persistNewlySettledPlayerProps(); await persistNewlySettledGolfH2H(); await persistAccountAdjustmentsForChallenges(); if (profile) render(); });
   if (liveTimer) return;
   liveTimer = setInterval(async () => {
     if (pendingSaveCount > 0) return; // don't rebuild the screen while a bet is mid-save
@@ -298,7 +298,8 @@ function startLiveScoreChecks() {
     const settledB = await persistNewlySettledWeeklyBets();
     const settledC = await persistNewlySettledPlayerProps();
     const settledD = await persistNewlySettledGolfH2H();
-    if (profile && (dataChanged || settledA || settledB || settledC || settledD)) render();
+    const settledE = await persistAccountAdjustmentsForChallenges();
+    if (profile && (dataChanged || settledA || settledB || settledC || settledD || settledE)) render();
   }, 60000);
 }
 
@@ -797,6 +798,12 @@ function renderProfileScreen() {
   const venmoInput = el('input'); venmoInput.value = profile.venmo || ''; venmoInput.placeholder = 'e.g. @jordan-smith';
   card.appendChild(venmoInput);
 
+  card.appendChild(el('label', null, 'Unit size ($)'));
+  const unitSizeInput = el('input'); unitSizeInput.type = 'number'; unitSizeInput.min = '0'; unitSizeInput.step = '0.5';
+  unitSizeInput.value = profile.unitSize || ''; unitSizeInput.placeholder = 'e.g. 5';
+  card.appendChild(unitSizeInput);
+  card.appendChild(el('div', 'setup-hint', 'Set what one unit is worth in real dollars. When a challenge you\'re in settles, your Account balance automatically adjusts by units won or lost \u00d7 this amount. Bet slips still just show units.'));
+
   const saveErr = el('div', 'pick-error');
   const saveBtn = el('button', 'lock-btn', 'Save changes');
   saveBtn.style.marginTop = '12px';
@@ -810,10 +817,11 @@ function renderProfileScreen() {
     saveErr.textContent = '';
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     const venmo = venmoInput.value.trim() || null;
+    const unitSize = unitSizeInput.value ? parseFloat(unitSizeInput.value) : null;
     const oldName = profile.name;
     try {
-      await saveProfileDoc(profile.uid, { name, venmo });
-      saveProfile({ ...profile, name, venmo });
+      await saveProfileDoc(profile.uid, { name, venmo, unitSize });
+      saveProfile({ ...profile, name, venmo, unitSize });
       if (name !== oldName && !players.includes(name)) { players.push(name); await savePlayers(players); }
       render();
     } catch (e) {
@@ -1100,16 +1108,13 @@ function dailyOptionPool() {
       if (g.status !== 'scheduled') return;
       if (houseDayKey(new Date(g.start)) !== dayKey) return;
       const spreadVal = computeSpread(lg.id, g);
-      if (spreadVal !== null) {
-        const side = rand() < 0.5 ? g.home : g.away;
-        const line = side === g.home ? spreadVal : -spreadVal;
-        pool.push({ sport: lg.id, gameId: g.id, betType: 'spread', side, line, label: `${side} ${line === 0 ? 'PK' : (line > 0 ? '+' + line : line)}`, gameLabel: g.away + ' @ ' + g.home });
-      }
       const totalVal = g.overUnder;
-      if (totalVal !== null && totalVal !== undefined) {
-        const side = rand() < 0.5 ? 'OVER' : 'UNDER';
-        pool.push({ sport: lg.id, gameId: g.id, betType: 'total', side, line: totalVal, label: `${side === 'OVER' ? 'Over' : 'Under'} ${totalVal}`, gameLabel: g.away + ' @ ' + g.home });
-      }
+      const availableTypes = [];
+      if (spreadVal !== null) availableTypes.push('spread');
+      if (totalVal !== null && totalVal !== undefined) availableTypes.push('total');
+      if (!availableTypes.length) return;
+      const betType = availableTypes[Math.floor(rand() * availableTypes.length)];
+      pool.push({ sport: lg.id, gameId: g.id, betType, gameLabel: g.away + ' @ ' + g.home });
     });
   });
   cachedDailyPool = pool;
@@ -1285,7 +1290,7 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
   if (sport === 'mlb' && (game.awayPitcher || game.homePitcher)) {
     card.appendChild(el('div', null, `${game.awayPitcher || 'TBD'} vs ${game.homePitcher || 'TBD'}`)).style.cssText = 'font-size:11px;color:var(--text-faint);margin:0 0 6px;';
   }
-  card.appendChild(el('div', null, `Pick: ${opt.label}`)).style.cssText = 'font-size:15px;font-weight:800;color:var(--accent);margin-bottom:10px;';
+  card.appendChild(el('div', null, opt.betType === 'spread' ? 'Spread' : 'Total')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;letter-spacing:0.03em;margin-bottom:6px;';
 
   const wk = houseDayKey(new Date());
   const existingBet = weeklyBetsFor(profile.name, wk).find(p => p.gameId === opt.gameId && p.betType === opt.betType);
@@ -1294,7 +1299,9 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
     const note = el('div', 'locked-note');
     note.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
     const infoDiv = el('div');
-    infoDiv.innerHTML = `<div class="ln-title">Your bet</div>${chipsFor(existingBet.units)} <b>${existingBet.units}u</b>`;
+    const spreadTxt = existingBet.betType === 'spread' ? (existingBet.line === 0 ? 'PK' : (existingBet.line > 0 ? '+' + existingBet.line : existingBet.line)) : null;
+    const pickTxt = existingBet.betType === 'total' ? `${existingBet.sideAbbr === 'OVER' ? 'Over' : 'Under'} ${existingBet.line}` : `${existingBet.sideAbbr} ${spreadTxt}`;
+    infoDiv.innerHTML = `<div class="ln-title">Your bet: ${pickTxt}</div>${chipsFor(existingBet.units)} <b>${existingBet.units}u</b>`;
     note.appendChild(infoDiv);
     if (game.status === 'scheduled') {
       const delBtn = el('button', null, '✕');
@@ -1325,7 +1332,7 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
     if (!alternatives.length) {
       swapPanel.appendChild(el('div', 'no-odds-note', 'No other options available to swap in today.'));
     } else {
-      alternatives.forEach((o,i) => { const op = document.createElement('option'); op.value = String(i); op.textContent = `${o.gameLabel} — ${o.label}`; altSel.appendChild(op); });
+      alternatives.forEach((o,i) => { const op = document.createElement('option'); op.value = String(i); op.textContent = `${o.gameLabel} — ${o.betType === 'spread' ? 'Spread' : 'Total'}`; altSel.appendChild(op); });
       swapPanel.appendChild(altSel);
       const confirmBtn = el('button', 'lock-btn', 'Confirm swap');
       confirmBtn.onclick = async () => {
@@ -1351,13 +1358,42 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
   }
 
   const key = opt.gameId + '_' + opt.betType;
+  const sideKey = 'house_' + key;
+
+  // side selector — the user picks which side, unlike the old auto-assigned version
+  const sideGrid = el('div', 'outcome-grid');
+  sideGrid.style.marginBottom = '10px';
+  let sideOptions;
+  if (opt.betType === 'total') {
+    sideOptions = [{ side: 'OVER', team: 'Over', label: String(game.overUnder) }, { side: 'UNDER', team: 'Under', label: String(game.overUnder) }];
+  } else {
+    const spreadVal = computeSpread(sport, game);
+    const favSide = spreadVal <= 0 ? game.home : game.away;
+    const magnitude = Math.abs(spreadVal);
+    const favLabel = magnitude === 0 ? 'PK' : '-' + magnitude;
+    const udLabel = magnitude === 0 ? 'PK' : '+' + magnitude;
+    sideOptions = [game.away, game.home].map(ab => ({ side: ab, team: fullTeamName(opt.gameId, ab), label: ab === favSide ? favLabel : udLabel }));
+  }
+  sideOptions.forEach(so => {
+    const btn = el('div', 'outcome-btn' + (selectedSide[sideKey] === so.side ? ' selected' : ''));
+    btn.innerHTML = `<div class="oc-team">${so.team}</div><div class="oc-line">${so.label}</div>`;
+    btn.onclick = () => {
+      selectedSide[sideKey] = so.side;
+      sideGrid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      refreshConfidenceUI();
+    };
+    sideGrid.appendChild(btn);
+  });
+  card.appendChild(sideGrid);
+
   const slip = el('div', 'bet-slip');
   if (weeklySelectedUnits[key] === undefined) weeklySelectedUnits[key] = 0;
   const cap = Math.min(HOUSE_BET_CAP, remaining);
 
   const confRow = el('div');
   confRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;';
-  const addBtn = el('button', null, '+ Add confidence');
+  const addBtn = el('button', null, '+ Add unit');
   addBtn.style.cssText = 'flex:1;background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:11px;font-size:13px;font-weight:700;';
   const removeBtn = el('button', null, '\u2715');
   removeBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:38px;height:38px;font-size:14px;flex-shrink:0;';
@@ -1365,7 +1401,7 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
   confRow.appendChild(removeBtn);
   slip.appendChild(confRow);
 
-  const lockBtn = el('button', 'lock-btn', 'Pick a confidence level');
+  const lockBtn = el('button', 'lock-btn', 'Pick a side first');
   lockBtn.disabled = true;
   slip.appendChild(lockBtn);
   const errEl = el('div', 'pick-error');
@@ -1374,11 +1410,12 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
 
   function refreshConfidenceUI() {
     const u = weeklySelectedUnits[key];
-    addBtn.textContent = u > 0 ? `${chipsFor(u)}  Add confidence (${u}/${cap})` : '+ Add confidence';
-    addBtn.disabled = u >= cap;
+    const hasSide = !!selectedSide[sideKey];
+    addBtn.textContent = u > 0 ? `${chipsFor(u)}  Add unit (${u}/${cap})` : '+ Add unit';
+    addBtn.disabled = u >= cap || !hasSide;
     removeBtn.disabled = u <= 0;
-    lockBtn.disabled = u <= 0;
-    lockBtn.textContent = u > 0 ? `Lock: ${chipsFor(u)}` : 'Pick a confidence level';
+    lockBtn.disabled = u <= 0 || !hasSide;
+    lockBtn.textContent = !hasSide ? 'Pick a side first' : (u > 0 ? `Lock: ${chipsFor(u)}` : 'Pick a unit amount');
   }
   addBtn.onclick = () => { if (weeklySelectedUnits[key] < cap) weeklySelectedUnits[key]++; refreshConfidenceUI(); };
   removeBtn.onclick = () => { if (weeklySelectedUnits[key] > 0) weeklySelectedUnits[key]--; refreshConfidenceUI(); };
@@ -1387,14 +1424,23 @@ function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
   lockBtn.onclick = async () => {
     try {
       const units = weeklySelectedUnits[key];
+      const chosenSide = selectedSide[sideKey];
       errEl.textContent = '';
-      if (!units) { errEl.textContent = 'Pick 1, 2, or 3 flames.'; return; }
+      if (!chosenSide) { errEl.textContent = 'Pick a side first.'; return; }
+      if (!units) { errEl.textContent = 'Pick 1, 2, or 3 units.'; return; }
       if (units > remaining + 0.001) { errEl.textContent = `Only ${remaining}u left in your bank this week.`; return; }
+      let line;
+      if (opt.betType === 'total') {
+        line = game.overUnder;
+      } else {
+        const spreadVal = computeSpread(sport, game);
+        line = chosenSide === game.home ? spreadVal : -spreadVal;
+      }
       const pick = {
         id: profile.name + '_weekly_' + opt.gameId + '_' + opt.betType + '_' + Date.now(),
         player: profile.name, sport, gameId: opt.gameId,
         gameLabel: game.away + ' @ ' + game.home,
-        betType: opt.betType, sideAbbr: opt.side, line: opt.line, units,
+        betType: opt.betType, sideAbbr: chosenSide, line, units,
         weekKey: wk, poolType: 'weekly',
         timestamp: new Date().toISOString()
       };
@@ -1517,7 +1563,7 @@ function renderDailyChallenge() {
     const usedMulligan = !!mulliganFor(profile.name, wk);
     options.forEach(opt => wrap.appendChild(renderDailyOptionCard(opt, remaining, options, usedMulligan)));
   }
-  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts. Units reset every day.`));
+  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u on any one pick. Units lock once a game starts. Units reset every day.`));
   return wrap;
 }
 
@@ -2653,12 +2699,24 @@ function renderSwipeMode(extraRows) {
 function renderSwipeCart() {
   const wrap = el('div');
   const backBtn = el('button', null, '\u2190 Back to swiping');
-  backBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin-bottom:10px;';
+  backBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin-bottom:10px;margin-top:5px;';
   backBtn.onclick = () => { challengeBrowseMode = 'swipe'; render(); };
   wrap.appendChild(backBtn);
 
   wrap.appendChild(el('div', 'week-header', `Your cart (${swipeCart.length})`));
   if (!swipeCart.length) { wrap.appendChild(el('div', 'empty', 'No accepted challenges yet — swipe right on some first.')); return wrap; }
+
+  const cartTotalUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
+  const banner = el('div', 'rank-banner');
+  const c1 = el('div', 'rank-cell');
+  c1.appendChild(el('div', 'rc-label', 'Total challenges'));
+  c1.appendChild(el('div', 'rc-value', String(swipeCart.length)));
+  banner.appendChild(c1);
+  const c2 = el('div', 'rank-cell');
+  c2.appendChild(el('div', 'rc-label', 'Total units'));
+  c2.appendChild(el('div', 'rc-value', String(cartTotalUnits)));
+  banner.appendChild(c2);
+  wrap.appendChild(banner);
 
   const sortedCart = swipeCart.slice().sort((a,b) => b.units - a.units);
   sortedCart.forEach((ch) => {
@@ -2680,7 +2738,11 @@ function renderSwipeCart() {
   });
 
   const totalCartUnits = swipeCart.reduce((s,ch) => s + ch.units, 0);
-  const confirmLabel = (n, u) => `Confirm ${n} Challenge${n === 1 ? '' : 's'} (Total ${u} Unit${u === 1 ? '' : 's'})`;
+  const confirmLabel = (n, u) => {
+    const base = `Confirm ${n} Challenge${n === 1 ? '' : 's'}`;
+    if (profile.unitSize) return `${base} (Cost = $${(u * profile.unitSize).toFixed(2)})`;
+    return `${base} (Total ${u} Unit${u === 1 ? '' : 's'})`;
+  };
   const confirmBtn = el('button', 'lock-btn', confirmLabel(swipeCart.length, totalCartUnits));
   confirmBtn.style.marginTop = '12px';
   confirmBtn.onclick = async () => {
@@ -3490,6 +3552,34 @@ async function persistNewlySettledGolfH2H() {
     const outcome = winnerName === p.sideAbbr ? 'win' : 'loss';
     p.settledResult = { status: outcome, profit: outcome === 'win' ? p.units : -p.units };
     p.finalScores = { [p.playerA]: a.score, [p.playerB]: b.score };
+    changed = true;
+  }
+  if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; retry next cycle */ } }
+  return changed;
+}
+
+async function persistAccountAdjustmentsForChallenges() {
+  if (!profile || !profile.unitSize) return false; // nothing to convert without a unit size set
+  let changed = false;
+  const mine = allPicks.filter(p => p.poolType === 'challenge' && p.status === 'accepted' && (p.creator === profile.name || p.acceptedBy === profile.name));
+  for (const ch of mine) {
+    const iAmCreator = ch.creator === profile.name;
+    const flagKey = iAmCreator ? 'creatorAcctAdjusted' : 'acceptorAcctAdjusted';
+    if (ch[flagKey]) continue; // already posted to account for this role
+    const profit = computeChallengeProfit(ch, iAmCreator);
+    if (profit === null) continue; // game not final yet
+    if (profit !== 0) {
+      const tx = {
+        id: profile.name + '_accounttx_challenge_' + ch.id,
+        poolType: 'accountTx', player: profile.name,
+        type: profit > 0 ? 'deposit' : 'withdraw', amount: Math.abs(profit) * profile.unitSize,
+        note: `Challenge result \u2014 ${challengeMarketTxt(ch)}`,
+        relatedChallengeId: ch.id,
+        timestamp: new Date().toISOString()
+      };
+      allPicks.push(tx);
+    }
+    ch[flagKey] = true;
     changed = true;
   }
   if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; retry next cycle */ } }
