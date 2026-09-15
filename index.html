@@ -1741,6 +1741,20 @@ async function recordSwipeSkip(challengeId) {
   allPicks.push(rec);
   try { await savePicks(allPicks); } catch (e) { /* best-effort; a reload may show it again if this fails */ }
 }
+function cartChallengeIdsFor(name) {
+  return new Set(allPicks.filter(p => p.poolType === 'swipeCartItem' && p.player === name).map(p => p.challengeId));
+}
+async function recordSwipeCartAdd(challengeId) {
+  const rec = { id: profile.name + '_cart_' + challengeId, poolType: 'swipeCartItem', player: profile.name, challengeId, timestamp: new Date().toISOString() };
+  allPicks.push(rec);
+  try { await savePicks(allPicks); } catch (e) { /* best-effort; a reload may lose this cart item if it fails */ }
+}
+async function recordSwipeCartRemove(challengeId) {
+  const idx = allPicks.findIndex(p => p.poolType === 'swipeCartItem' && p.player === profile.name && p.challengeId === challengeId);
+  if (idx === -1) return;
+  const removed = allPicks.splice(idx, 1)[0];
+  try { await savePicks(allPicks); } catch (e) { allPicks.push(removed); /* best-effort */ }
+}
 
 async function topUpHouseChallenges() {
   const openCount = allPicks.filter(p => p.poolType === 'challenge' && p.creator === 'House' && p.status === 'open').length;
@@ -1799,7 +1813,7 @@ function renderSwipeCard(ch) {
   btnRow.appendChild(declineBtn); btnRow.appendChild(acceptBtn);
   cardWrap.appendChild(btnRow);
 
-  function doAccept() { swipeCart.push(ch); swipeStack.shift(); render(); }
+  function doAccept() { swipeCart.push(ch); swipeStack.shift(); recordSwipeCartAdd(ch.id); render(); }
   function doDecline() { swipeStack.shift(); recordSwipeSkip(ch.id); render(); }
   declineBtn.onclick = doDecline;
   acceptBtn.onclick = doAccept;
@@ -1867,7 +1881,7 @@ function renderSwipeCart() {
     row.appendChild(left);
     const rmBtn = el('button', null, '\u2715');
     rmBtn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-faint);border-radius:6px;width:26px;height:26px;font-size:12px;';
-    rmBtn.onclick = () => { swipeCart.splice(i,1); render(); };
+    rmBtn.onclick = () => { swipeCart.splice(i,1); recordSwipeCartRemove(ch.id); render(); };
     row.appendChild(rmBtn);
     wrap.appendChild(row);
   });
@@ -1881,6 +1895,8 @@ function renderSwipeCart() {
       const idx = allPicks.findIndex(p => p.id === ch.id);
       if (idx > -1) { allPicks[idx].status = 'accepted'; allPicks[idx].acceptedBy = profile.name; }
     });
+    const cartMarkerIdxs = snapshot.map(ch => allPicks.findIndex(p => p.poolType === 'swipeCartItem' && p.player === profile.name && p.challengeId === ch.id)).filter(i => i > -1);
+    const removedMarkers = cartMarkerIdxs.sort((a,b) => b - a).map(i => allPicks.splice(i, 1)[0]);
     try {
       await savePicks(allPicks);
       swipeCart = [];
@@ -1892,6 +1908,7 @@ function renderSwipeCart() {
         const idx = allPicks.findIndex(p => p.id === ch.id);
         if (idx > -1) { allPicks[idx].status = 'open'; allPicks[idx].acceptedBy = null; }
       });
+      removedMarkers.forEach(m => allPicks.push(m));
       alert("Couldn't confirm (" + describeFetchError(e) + ") — try again.");
       confirmBtn.disabled = false; confirmBtn.textContent = `Confirm ${snapshot.length} challenges`;
     }
@@ -1924,6 +1941,8 @@ function renderExistingChallenges() {
 
   if (existingChallengeView === 'global') {
     if (!swipeStackInitialized) {
+      const persistedCartIds = cartChallengeIdsFor(profile.name);
+      swipeCart = all.filter(ch => persistedCartIds.has(ch.id) && ch.status === 'open');
       const cartIds = new Set(swipeCart.map(c => c.id));
       const declinedIds = declinedChallengeIdsFor(profile.name);
       swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id) && !declinedIds.has(ch.id));
@@ -2180,7 +2199,7 @@ async function persistNewlySettledPicks() {
 }
 function potentialWin(p) { return p.units; }
 
-function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan' && p.poolType !== 'swipeSkip'); }
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan' && p.poolType !== 'swipeSkip' && p.poolType !== 'swipeCartItem'); }
 async function migrateLegacyWeeklyPicks() {
   let changed = false;
   allPicks.forEach(p => {
@@ -2219,7 +2238,7 @@ function rankAmong(valueForName) {
   return { rank: idx + 1, total: arr.length };
 }
 
-function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan' || p.poolType === 'swipeSkip') return false; return !gameIndex[p.gameId]; }
+function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan' || p.poolType === 'swipeSkip' || p.poolType === 'swipeCartItem') return false; return !gameIndex[p.gameId]; }
 
 async function deletePick(pickId) {
   const idx = allPicks.findIndex(p => p.id === pickId);
