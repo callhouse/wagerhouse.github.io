@@ -685,7 +685,7 @@ function renderTabs() {
   const bar = document.getElementById('tabbar');
   bar.innerHTML = '';
   if (!profile) return;
-  [['games','Make Challenge'],['existing','Existing Challenges'],['completed','Accepted Challenges']].forEach(([id,label]) => {
+  [['games','Make Challenge'],['existing','Open Challenges'],['completed','Accepted Challenges']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (activeTab === id ? ' active' : ''), label);
     t.onclick = () => { activeTab = id; render(); };
     bar.appendChild(t);
