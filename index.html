@@ -2824,8 +2824,8 @@ function renderGameCard(g, sport, meta) {
   const totalVal = g.overUnder;
   const favSide = spread !== null ? (spread <= 0 ? g.home : g.away) : null;
   const moneylineOnly = !!(LEAGUES_META.find(l => l.id === sport) || {}).moneylineOnly;
-  const hasSpread = moneylineOnly ? true : spread !== null;
-  const spreadPillLabel = moneylineOnly ? 'Moneyline' : 'Spread';
+  const hasSpread = true; // always offer this market — falls back to moneyline when no spread number is posted
+  const spreadPillLabel = (moneylineOnly || spread === null) ? 'Moneyline' : 'Spread';
   const hasTotal = !moneylineOnly && totalVal !== null && totalVal !== undefined;
   const hasPlayerProp = sport === 'nfl';
   const openSpread = myChallengeFor(g.id, 'spread');
