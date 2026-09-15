@@ -1719,6 +1719,15 @@ function generateHouseChallenges(limit) {
   }));
 }
 
+function declinedChallengeIdsFor(name) {
+  return new Set(allPicks.filter(p => p.poolType === 'swipeSkip' && p.player === name).map(p => p.challengeId));
+}
+async function recordSwipeSkip(challengeId) {
+  const rec = { id: profile.name + '_skip_' + challengeId, poolType: 'swipeSkip', player: profile.name, challengeId, timestamp: new Date().toISOString() };
+  allPicks.push(rec);
+  try { await savePicks(allPicks); } catch (e) { /* best-effort; a reload may show it again if this fails */ }
+}
+
 async function topUpHouseChallenges() {
   const openCount = allPicks.filter(p => p.poolType === 'challenge' && p.creator === 'House' && p.status === 'open').length;
   const needed = 100 - openCount;
@@ -1777,7 +1786,7 @@ function renderSwipeCard(ch) {
   cardWrap.appendChild(btnRow);
 
   function doAccept() { swipeCart.push(ch); swipeStack.shift(); render(); }
-  function doDecline() { swipeStack.shift(); render(); }
+  function doDecline() { swipeStack.shift(); recordSwipeSkip(ch.id); render(); }
   declineBtn.onclick = doDecline;
   acceptBtn.onclick = doAccept;
 
@@ -1902,7 +1911,8 @@ function renderExistingChallenges() {
   if (existingChallengeView === 'global') {
     if (!swipeStackInitialized) {
       const cartIds = new Set(swipeCart.map(c => c.id));
-      swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id));
+      const declinedIds = declinedChallengeIdsFor(profile.name);
+      swipeStack = list.filter(ch => ch.creator !== profile.name && !cartIds.has(ch.id) && !declinedIds.has(ch.id));
       swipeStackInitialized = true;
     }
     if (challengeBrowseMode === 'cart') { wrap.appendChild(renderSwipeCart()); return wrap; }
@@ -2156,7 +2166,7 @@ async function persistNewlySettledPicks() {
 }
 function potentialWin(p) { return p.units; }
 
-function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan'); }
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan' && p.poolType !== 'swipeSkip'); }
 async function migrateLegacyWeeklyPicks() {
   let changed = false;
   allPicks.forEach(p => {
@@ -2195,7 +2205,7 @@ function rankAmong(valueForName) {
   return { rank: idx + 1, total: arr.length };
 }
 
-function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan') return false; return !gameIndex[p.gameId]; }
+function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan' || p.poolType === 'swipeSkip') return false; return !gameIndex[p.gameId]; }
 
 async function deletePick(pickId) {
   const idx = allPicks.findIndex(p => p.id === pickId);
