@@ -660,12 +660,25 @@ function startPolling() {
 // ---------- render root ----------
 function render() {
   saveNavState();
+  const active = document.activeElement;
+  const activeId = active && active.id ? active.id : null;
+  const selStart = active && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+  const selEnd = active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
   try {
     renderInner();
   } catch (e) {
     console.error('Render failed:', e);
     const main = document.getElementById('main');
     if (main) main.innerHTML = '<div class="empty">Something went wrong showing this screen. Your last action was likely saved fine — try switching tabs or reloading.</div>';
+  }
+  if (activeId) {
+    const restored = document.getElementById(activeId);
+    if (restored && typeof restored.focus === 'function') {
+      restored.focus();
+      if (selStart !== null && restored.setSelectionRange) {
+        try { restored.setSelectionRange(selStart, selEnd); } catch (e) { /* not a text-selectable input */ }
+      }
+    }
   }
 }
 function renderInner() {
@@ -2995,11 +3008,11 @@ function renderExistingChallenges() {
   maxUnitsScroller.style.cssText = 'display:flex;gap:8px;padding:3px 16px;align-items:center;';
   const minLabel = el('span', null, 'Units:'); minLabel.style.cssText = 'font-size:11px;color:var(--text-faint);font-weight:700;flex-shrink:0;';
   maxUnitsScroller.appendChild(minLabel);
-  const minInput = el('input'); minInput.type = 'number'; minInput.min = '0'; minInput.step = '0.5'; minInput.placeholder = 'No min';
+  const minInput = el('input'); minInput.type = 'number'; minInput.min = '0'; minInput.step = '0.5'; minInput.placeholder = 'No min'; minInput.id = 'openChallengeMinUnitsInput';
   minInput.value = openChallengeMinUnits === null ? '' : openChallengeMinUnits;
   minInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;';
   const toLabel = el('span', null, 'to'); toLabel.style.cssText = 'font-size:11px;color:var(--text-faint);flex-shrink:0;';
-  const maxInput = el('input'); maxInput.type = 'number'; maxInput.min = '0'; maxInput.step = '0.5'; maxInput.placeholder = 'No max';
+  const maxInput = el('input'); maxInput.type = 'number'; maxInput.min = '0'; maxInput.step = '0.5'; maxInput.placeholder = 'No max'; maxInput.id = 'openChallengeMaxUnitsInput';
   maxInput.value = openChallengeMaxUnits === null ? '' : openChallengeMaxUnits;
   maxInput.style.cssText = 'flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;';
   minInput.addEventListener('input', () => {
