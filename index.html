@@ -300,6 +300,9 @@ const WH_RATING_BASE = 1500;
 let setupError = '';
 let authMode = 'login'; // 'login' | 'signup'
 let menuOpen = false;
+let activeChallengesOpen = true;
+let completedChallengesOpen = true;
+let acceptedChallengeLeague = null; // sport id or null
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 
@@ -2337,8 +2340,26 @@ function myChallengeOutcome(ch) {
 function renderCompletedChallenges() {
   const wrap = el('div');
   const mine = allPicks.filter(p => p.poolType === 'challenge' && (p.creator === profile.name || p.acceptedBy === profile.name || p.targetFriend === profile.name));
-  const active = mine.filter(ch => ch.status === 'accepted' && settlePick(ch).status === 'pending');
-  const completed = mine.filter(ch => ch.status === 'declined' || (ch.status === 'accepted' && settlePick(ch).status !== 'pending'));
+
+  // league filter chips
+  const leaguesPresent = [...new Set(mine.map(ch => ch.sport).filter(Boolean))];
+  if (leaguesPresent.length) {
+    const scroller = el('div', 'league-scroller');
+    const allPill = el('button', 'league-pill' + (acceptedChallengeLeague === null ? ' active' : ''), 'All leagues');
+    allPill.onclick = () => { acceptedChallengeLeague = null; render(); };
+    scroller.appendChild(allPill);
+    leaguesPresent.forEach(sport => {
+      const label = (LEAGUES_META.find(l => l.id === sport) || {}).label || (sport || 'sport').toUpperCase();
+      const pill = el('button', 'league-pill' + (acceptedChallengeLeague === sport ? ' active' : ''), label);
+      pill.onclick = () => { acceptedChallengeLeague = sport; render(); };
+      scroller.appendChild(pill);
+    });
+    wrap.appendChild(scroller);
+  }
+
+  const filtered = acceptedChallengeLeague === null ? mine : mine.filter(ch => ch.sport === acceptedChallengeLeague);
+  const active = filtered.filter(ch => ch.status === 'accepted' && settlePick(ch).status === 'pending');
+  const completed = filtered.filter(ch => ch.status === 'declined' || (ch.status === 'accepted' && settlePick(ch).status !== 'pending'));
   active.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
   completed.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -2348,30 +2369,38 @@ function renderCompletedChallenges() {
   const unitsWonChallenges = settledOnes.reduce((s,x) => s + (x.outcome === 'win' ? x.ch.units : x.outcome === 'loss' ? -x.ch.units : 0), 0);
   const winPct = (wins + losses) > 0 ? (wins / (wins + losses) * 100) : 0;
 
-  if (settledOnes.length) {
-    const banner = el('div', 'rank-banner');
-    const c1 = el('div', 'rank-cell');
-    c1.appendChild(el('div', 'rc-label', 'Total challenges'));
-    c1.appendChild(el('div', 'rc-value', String(settledOnes.length)));
-    banner.appendChild(c1);
-    const c2 = el('div', 'rank-cell');
-    c2.appendChild(el('div', 'rc-label', 'Units won'));
-    c2.appendChild(el('div', 'rc-value', fmtUnits(unitsWonChallenges))).style.color = unitsWonChallenges >= 0 ? '#4CAF50' : 'var(--danger)';
-    banner.appendChild(c2);
-    const c3 = el('div', 'rank-cell');
-    c3.appendChild(el('div', 'rc-label', 'Win %'));
-    c3.appendChild(el('div', 'rc-value', winPct.toFixed(0) + '%'));
-    banner.appendChild(c3);
-    wrap.appendChild(banner);
+  const banner = el('div', 'rank-banner');
+  const c1 = el('div', 'rank-cell');
+  c1.appendChild(el('div', 'rc-label', 'Total challenges'));
+  c1.appendChild(el('div', 'rc-value', String(settledOnes.length)));
+  banner.appendChild(c1);
+  const c2 = el('div', 'rank-cell');
+  c2.appendChild(el('div', 'rc-label', 'Units won'));
+  c2.appendChild(el('div', 'rc-value', fmtUnits(unitsWonChallenges))).style.color = unitsWonChallenges >= 0 ? '#4CAF50' : 'var(--danger)';
+  banner.appendChild(c2);
+  const c3 = el('div', 'rank-cell');
+  c3.appendChild(el('div', 'rc-label', 'Win %'));
+  c3.appendChild(el('div', 'rc-value', winPct.toFixed(0) + '%'));
+  banner.appendChild(c3);
+  wrap.appendChild(banner);
+
+  const activeHeader = el('div', 'week-header', `${activeChallengesOpen ? '\u25be' : '\u25b8'} Active (${active.length})`);
+  activeHeader.style.cursor = 'pointer';
+  activeHeader.onclick = () => { activeChallengesOpen = !activeChallengesOpen; render(); };
+  wrap.appendChild(activeHeader);
+  if (activeChallengesOpen) {
+    if (!active.length) { wrap.appendChild(el('div', 'empty', 'Nothing accepted and waiting on a result right now.')); }
+    else { active.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
   }
 
-  wrap.appendChild(el('div', 'week-header', `Active (${active.length})`));
-  if (!active.length) { wrap.appendChild(el('div', 'empty', 'Nothing accepted and waiting on a result right now.')); }
-  else { active.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
-
-  wrap.appendChild(el('div', 'week-header', `Completed (${completed.length})`));
-  if (!completed.length) { wrap.appendChild(el('div', 'empty', 'No completed challenges yet.')); return wrap; }
-  completed.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
+  const completedHeader = el('div', 'week-header', `${completedChallengesOpen ? '\u25be' : '\u25b8'} Completed (${completed.length})`);
+  completedHeader.style.cursor = 'pointer';
+  completedHeader.onclick = () => { completedChallengesOpen = !completedChallengesOpen; render(); };
+  wrap.appendChild(completedHeader);
+  if (completedChallengesOpen) {
+    if (!completed.length) { wrap.appendChild(el('div', 'empty', 'No completed challenges yet.')); }
+    else { completed.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+  }
   return wrap;
 }
 
