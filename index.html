@@ -353,6 +353,8 @@ let openChallengeTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'player' | 
 let openChallengeMinUnits = null; // null = no floor
 let unitFilterDebounce = null;
 let counterFormOpen = {};
+let friendsGlobalOpen = true;
+let friendsDirectOpen = true;
 let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
@@ -3314,13 +3316,24 @@ function renderExistingChallenges() {
   if (existingChallengeView === 'friends') {
     const friendsGlobal = list.filter(ch => ch.visibility === 'public');
     const friendsDirect = list.filter(ch => ch.visibility === 'friend');
-    wrap.appendChild(el('div', 'week-header', `Friends' Global Challenges (${friendsGlobal.length})`));
-    if (!friendsGlobal.length) { wrap.appendChild(el('div', 'empty', 'None of your friends have posted a public challenge right now.')); }
-    else { friendsGlobal.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
 
-    wrap.appendChild(el('div', 'week-header', `Friends' Challenges to You (${friendsDirect.length})`));
-    if (!friendsDirect.length) { wrap.appendChild(el('div', 'empty', 'Nothing sent directly to you right now.')); }
-    else { friendsDirect.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+    const globalHeader = el('div', 'week-header', `${friendsGlobalOpen ? '\u25be' : '\u25b8'} Friends' Global Challenges (${friendsGlobal.length})`);
+    globalHeader.style.cursor = 'pointer';
+    globalHeader.onclick = () => { friendsGlobalOpen = !friendsGlobalOpen; render(); };
+    wrap.appendChild(globalHeader);
+    if (friendsGlobalOpen) {
+      if (!friendsGlobal.length) { wrap.appendChild(el('div', 'empty', 'None of your friends have posted a public challenge right now.')); }
+      else { friendsGlobal.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+    }
+
+    const directHeader = el('div', 'week-header', `${friendsDirectOpen ? '\u25be' : '\u25b8'} Friends' Challenges to You (${friendsDirect.length})`);
+    directHeader.style.cursor = 'pointer';
+    directHeader.onclick = () => { friendsDirectOpen = !friendsDirectOpen; render(); };
+    wrap.appendChild(directHeader);
+    if (friendsDirectOpen) {
+      if (!friendsDirect.length) { wrap.appendChild(el('div', 'empty', 'Nothing sent directly to you right now.')); }
+      else { friendsDirect.forEach(ch => wrap.appendChild(renderChallengeRow(ch))); }
+    }
     return wrap;
   }
 
