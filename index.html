@@ -1945,6 +1945,7 @@ function renderKalshiSection() {
 
   if (allHistory.length) {
     const banner = el('div', 'rank-banner');
+    banner.style.marginTop = '10px';
     const c1 = el('div', 'rank-cell');
     c1.appendChild(el('div', 'rc-label', 'Total profit'));
     c1.appendChild(el('div', 'rc-value', '$' + totalProfit.toFixed(2))).style.color = totalProfit >= 0 ? '#4CAF50' : 'var(--danger)';
@@ -2046,7 +2047,7 @@ function renderGames() {
 
 function renderGolfSection() {
   const wrap = el('div');
-  wrap.appendChild(el('div', 'setup-hint', "Golf challenges are head-to-head: pick two players from the current tournament field, and whoever posts the lower score when the tournament finishes wins. Beta — double-check results once they settle."));
+  wrap.appendChild(el('div', 'setup-hint', "Golf challenges are moneyline bets: pick two players from the current tournament field, and whoever posts the lower score when the tournament finishes wins. Beta — double-check results once they settle."));
 
   if (!golfFieldCache) {
     if (!golfFieldAttempted) {
@@ -2097,6 +2098,26 @@ function renderGolfSection() {
   selB.onchange = () => { chosenPlayer = null; createBtn.disabled = true; rebuildSideGrid(); };
   wrap.appendChild(sideGrid);
 
+  let oddsMultiplier = 1;
+  const oddsWrap = el('div');
+  oddsWrap.style.cssText = 'margin-top:8px;';
+  oddsWrap.appendChild(el('div', null, 'Payout odds for whoever accepts')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:6px;';
+  const oddsRow = el('div'); oddsRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+  [['1','Even (1:1)'],['2','2:1'],['3','3:1'],['0.5','1:2'],['0.333333333','1:3']].forEach(([val,label], i) => {
+    const btn = el('button', null, label);
+    btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;';
+    if (i === 0) { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
+    btn.onclick = () => {
+      oddsMultiplier = parseFloat(val);
+      oddsRow.querySelectorAll('button').forEach(b => { b.style.borderColor = 'var(--border)'; b.style.color = 'var(--text-dim)'; });
+      btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)';
+    };
+    oddsRow.appendChild(btn);
+  });
+  oddsWrap.appendChild(oddsRow);
+  oddsWrap.appendChild(el('div', 'setup-hint', 'You always get even money back on your own pick. These odds only change what the person who accepts is paid if their pick wins — 2:1 pays them double their stake, 1:2 pays them half.'));
+  wrap.appendChild(oddsWrap);
+
   const slip = el('div', 'bet-slip');
   const row2 = el('div'); row2.style.cssText = 'display:grid;grid-template-columns:0.8fr 1.4fr;gap:8px;';
   const unitsInput = el('input'); unitsInput.type = 'number'; unitsInput.min = '0.5'; unitsInput.step = '0.5'; unitsInput.value = '1'; unitsInput.placeholder = 'Units';
@@ -2129,6 +2150,7 @@ function renderGolfSection() {
       poolType: 'challenge', propType: 'golf_h2h', creator: profile.name,
       sport: 'pga', gameLabel: field.tournamentName, tournamentId: field.tournamentId,
       playerA: selA.value, playerB: selB.value, sideAbbr: displaySide, units,
+      oddsMultiplier,
       visibility: friend ? 'friend' : 'public',
       targetFriend: friend, status: 'open', acceptedBy: null,
       timestamp: new Date().toISOString()
@@ -2189,6 +2211,12 @@ function fullGameLabel(ch) {
   if (idx && idx.game) return fullTeamName(ch.gameId, idx.game.away) + ' @ ' + fullTeamName(ch.gameId, idx.game.home);
   return ch.gameLabel;
 }
+function oddsLabel(mult) {
+  if (!mult || mult === 1) return null;
+  if (mult >= 1) return `${Math.round(mult * 100) / 100}:1`;
+  const inv = Math.round(1 / mult);
+  return `1:${inv}`;
+}
 function challengeMarketTxt(ch) {
   if (ch.propType === 'player') {
     const catLabel = (PLAYER_PROP_CATEGORIES.find(c => c.id === ch.statCategory) || {}).label || ch.statCategory;
@@ -2196,10 +2224,15 @@ function challengeMarketTxt(ch) {
   }
   if (ch.propType === 'golf_h2h') {
     const opp = ch.sideAbbr === ch.playerA ? ch.playerB : ch.playerA;
-    return `${ch.sideAbbr} to beat ${opp} (H2H)`;
+    const odds = oddsLabel(ch.oddsMultiplier);
+    return `${ch.sideAbbr} to beat ${opp} (ML${odds ? ' ' + odds : ''})`;
   }
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   if (ch.betType === 'total') return (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line;
+  if (ch.betType === 'spread' && !spreadTxt) {
+    const odds = oddsLabel(ch.oddsMultiplier);
+    return fullTeamName(ch.gameId, ch.sideAbbr) + ` (ML${odds ? ' ' + odds : ''})`;
+  }
   return fullTeamName(ch.gameId, ch.sideAbbr) + (spreadTxt ? ' ' + spreadTxt : '');
 }
 
@@ -2257,7 +2290,8 @@ function renderChallengeRow(ch) {
     else if (myOutcome === 'push') { txt = 'Pushed — no units changed hands'; color = 'var(--gold)'; }
     else {
       const opponent = isMine ? ch.acceptedBy : ch.creator;
-      txt = myOutcome === 'win' ? `You won ${ch.units}u vs ${opponent}` : `You lost ${ch.units}u vs ${opponent}`;
+      const profitAmt = Math.abs(computeChallengeProfit(ch, isMine));
+      txt = myOutcome === 'win' ? `You won ${profitAmt}u vs ${opponent}` : `You lost ${profitAmt}u vs ${opponent}`;
       color = myOutcome === 'win' ? 'var(--accent)' : 'var(--danger)';
     }
     card.appendChild(el('div', null, txt)).style.cssText = `font-size:13px;font-weight:700;color:${color};`;
@@ -2559,6 +2593,7 @@ function renderSwipeCart() {
 
 function renderExistingChallenges() {
   const toggle = el('div', 'league-scroller');
+  toggle.style.marginTop = '6px';
   [['global','Global'],['friends','Friends'],['mine','Mine']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (existingChallengeView === id ? ' active' : ''), label);
     pill.onclick = () => { existingChallengeView = id; challengeBrowseMode = 'swipe'; swipeStackInitialized = false; openChallengeLeague = null; render(); };
@@ -2599,7 +2634,7 @@ function renderExistingChallenges() {
   });
 
   const typeScroller = el('div', 'league-scroller');
-  [['all','All'],['spread','Spread'],['total','Total'],['player','Player Prop'],['golf','Golf H2H']].forEach(([id,label]) => {
+  [['all','All'],['spread','Spread'],['total','Total'],['moneyline','Moneyline'],['player','Player Prop']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (openChallengeTypeFilter === id ? ' active' : ''), label);
     pill.onclick = () => { openChallengeTypeFilter = id; swipeStackInitialized = false; render(); };
     typeScroller.appendChild(pill);
@@ -2624,7 +2659,8 @@ function renderExistingChallenges() {
   });
   const list = openChallengeTypeFilter === 'all' ? byDate : byDate.filter(ch => {
     if (openChallengeTypeFilter === 'player') return ch.propType === 'player';
-    if (openChallengeTypeFilter === 'golf') return ch.propType === 'golf_h2h';
+    if (openChallengeTypeFilter === 'moneyline') return ch.propType === 'golf_h2h' || (ch.betType === 'spread' && !ch.propType && !ch.spreadLabel);
+    if (openChallengeTypeFilter === 'spread') return !ch.propType && ch.betType === 'spread' && !!ch.spreadLabel;
     return !ch.propType && ch.betType === openChallengeTypeFilter;
   });
   list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -2666,6 +2702,16 @@ function myChallengeOutcome(ch) {
   if (r.status === 'win') return iAmCreator ? 'loss' : 'win';
   return iAmCreator ? 'win' : 'loss';
 }
+function computeChallengeProfit(ch, iAmCreator) {
+  const r = settlePick(ch);
+  if (r.status === 'pending') return null;
+  if (r.status === 'push') return 0;
+  const offeredSideWon = r.status === 'win';
+  const iWin = iAmCreator ? !offeredSideWon : offeredSideWon;
+  const mult = ch.oddsMultiplier || 1;
+  if (iWin) return iAmCreator ? ch.units : ch.units * mult;
+  return -ch.units;
+}
 
 function renderCompletedChallenges() {
   const wrap = el('div');
@@ -2696,7 +2742,7 @@ function renderCompletedChallenges() {
   const settledOnes = completed.map(ch => ({ ch, outcome: myChallengeOutcome(ch) })).filter(x => x.outcome !== null);
   const wins = settledOnes.filter(x => x.outcome === 'win').length;
   const losses = settledOnes.filter(x => x.outcome === 'loss').length;
-  const unitsWonChallenges = settledOnes.reduce((s,x) => s + (x.outcome === 'win' ? x.ch.units : x.outcome === 'loss' ? -x.ch.units : 0), 0);
+  const unitsWonChallenges = settledOnes.reduce((s,x) => s + (computeChallengeProfit(x.ch, x.ch.creator === profile.name) || 0), 0);
   const winPct = (wins + losses) > 0 ? (wins / (wins + losses) * 100) : 0;
 
   const banner = el('div', 'rank-banner');
@@ -2796,8 +2842,7 @@ function renderGameCard(g, sport, meta) {
     if (existing) {
       const note = el('div', 'locked-note');
       note.style.marginTop = '8px';
-      const spreadTxt = betType === 'spread' ? pickSpreadDisplay(existing) : null;
-      const marketTxt = betType === 'total' ? (existing.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + existing.line : existing.sideAbbr + (spreadTxt ? ' ' + spreadTxt : '');
+      const marketTxt = challengeMarketTxt(existing);
       note.innerHTML = `<div class="ln-title">You're offering</div>${marketTxt} · <b>${existing.units}u</b><div style="margin-top:4px;font-size:11.5px;color:var(--text-dim);">${challengeStatusText(existing)}</div>`;
       section.appendChild(note);
       return section;
@@ -2844,10 +2889,32 @@ function renderGameCard(g, sport, meta) {
       adjustPanel.style.display = 'none';
       adjustBtn.style.display = '';
     };
+    let oddsMultiplier = 1;
     if (defaultMagnitude !== null) {
       adjustRow.appendChild(adjustBtn);
       adjustRow.appendChild(adjustPanel);
       section.appendChild(adjustRow);
+    } else if (betType === 'spread') {
+      // moneyline case — no spread number, so offer odds instead of a line to adjust
+      const oddsWrap = el('div');
+      oddsWrap.style.cssText = 'margin-top:8px;';
+      oddsWrap.appendChild(el('div', null, 'Payout odds for whoever accepts')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;font-weight:700;margin-bottom:6px;';
+      const oddsRow = el('div'); oddsRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+      const oddsOptions = [['1','Even (1:1)'],['2','2:1'],['3','3:1'],['0.5','1:2'],['0.333333333','1:3']];
+      oddsOptions.forEach(([val,label], i) => {
+        const btn = el('button', null, label);
+        btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;';
+        if (i === 0) { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
+        btn.onclick = () => {
+          oddsMultiplier = parseFloat(val);
+          oddsRow.querySelectorAll('button').forEach(b => { b.style.borderColor = 'var(--border)'; b.style.color = 'var(--text-dim)'; });
+          btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)';
+        };
+        oddsRow.appendChild(btn);
+      });
+      oddsWrap.appendChild(oddsRow);
+      oddsWrap.appendChild(el('div', 'setup-hint', 'You always get even money back on your own side. These odds only change what the person who accepts is paid if their side wins — 2:1 pays them double their stake, 1:2 pays them half.'));
+      section.appendChild(oddsWrap);
     }
     rebuildGrid();
 
@@ -2895,6 +2962,7 @@ function renderGameCard(g, sport, meta) {
         poolType: 'challenge', creator: profile.name,
         sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
         betType, sideAbbr: displaySide, units, line, spreadLabel,
+        oddsMultiplier: betType === 'spread' ? oddsMultiplier : 1,
         visibility: friend ? 'friend' : 'public',
         targetFriend: friend, status: 'open', acceptedBy: null,
         timestamp: new Date().toISOString()
