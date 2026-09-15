@@ -258,14 +258,15 @@ async function refreshGameLists() {
 
 let liveTimer = null;
 function startLiveScoreChecks() {
-  refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); if (profile) render(); });
+  refreshGameLists().then(async () => { await persistNewlySettledPicks(); await persistNewlySettledWeeklyBets(); await persistNewlySettledPlayerProps(); if (profile) render(); });
   if (liveTimer) return;
   liveTimer = setInterval(async () => {
     if (pendingSaveCount > 0) return; // don't rebuild the screen while a bet is mid-save
     const dataChanged = await refreshGameLists();
     const settledA = await persistNewlySettledPicks();
     const settledB = await persistNewlySettledWeeklyBets();
-    if (profile && (dataChanged || settledA || settledB)) render();
+    const settledC = await persistNewlySettledPlayerProps();
+    if (profile && (dataChanged || settledA || settledB || settledC)) render();
   }, 60000);
 }
 
@@ -2013,6 +2014,10 @@ function fullGameLabel(ch) {
   return ch.gameLabel;
 }
 function challengeMarketTxt(ch) {
+  if (ch.propType === 'player') {
+    const catLabel = (PLAYER_PROP_CATEGORIES.find(c => c.id === ch.statCategory) || {}).label || ch.statCategory;
+    return `${ch.playerName} ${(ch.sideAbbr === 'OVER' ? 'Over' : 'Under')} ${ch.line} ${catLabel}`;
+  }
   const spreadTxt = ch.betType === 'spread' ? pickSpreadDisplay(ch) : null;
   if (ch.betType === 'total') return (ch.sideAbbr === 'OVER' ? 'Over' : 'Under') + ' ' + ch.line;
   return fullTeamName(ch.gameId, ch.sideAbbr) + (spreadTxt ? ' ' + spreadTxt : '');
@@ -2059,7 +2064,10 @@ function renderChallengeRow(ch) {
   } else if (ch.status === 'accepted') {
     const myOutcome = myChallengeOutcome(ch) || 'pending';
     let txt, color;
-    if (myOutcome === 'pending') { txt = `Accepted by ${ch.acceptedBy} — game not final yet`; color = 'var(--gold)'; }
+    if (myOutcome === 'pending' && ch.propType === 'player' && ch.playerNotFound) {
+      txt = `Couldn't find "${ch.playerName}" in the final box score — may need manual review`;
+      color = 'var(--gold)';
+    } else if (myOutcome === 'pending') { txt = `Accepted by ${ch.acceptedBy} — game not final yet`; color = 'var(--gold)'; }
     else if (myOutcome === 'push') { txt = 'Pushed — no units changed hands'; color = 'var(--gold)'; }
     else {
       const opponent = isMine ? ch.acceptedBy : ch.creator;
@@ -2640,6 +2648,97 @@ function renderGameCard(g, sport, meta) {
     if (magnitude === null) return [{ side: 'OVER', team: 'Over', label: '—' }, { side: 'UNDER', team: 'Under', label: '—' }];
     return [{ side: 'OVER', team: 'Over', label: String(magnitude) }, { side: 'UNDER', team: 'Under', label: String(magnitude) }];
   }));
+
+  if (sport === 'nfl') {
+    const section = el('div');
+    section.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border);';
+    section.appendChild(el('div', null, 'Player Prop (beta)')).style.cssText = 'font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.03em;font-weight:700;margin-bottom:6px;';
+
+    const nameInput = el('input'); nameInput.placeholder = "Player name (e.g. Jalen Hurts)";
+    nameInput.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin-bottom:8px;box-sizing:border-box;';
+    section.appendChild(nameInput);
+
+    const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:1.4fr 1fr;gap:8px;margin-bottom:8px;';
+    const catSel = el('select');
+    catSel.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+    PLAYER_PROP_CATEGORIES.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.label; catSel.appendChild(o); });
+    row.appendChild(catSel);
+    const lineInput = el('input'); lineInput.type = 'number'; lineInput.step = '0.5'; lineInput.placeholder = 'Line (e.g. 249.5)';
+    lineInput.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;';
+    row.appendChild(lineInput);
+    section.appendChild(row);
+
+    const sideGrid = el('div', 'outcome-grid');
+    let chosenSide = null;
+    ['OVER','UNDER'].forEach(sv => {
+      const btn = el('div', 'outcome-btn');
+      btn.innerHTML = `<div class="oc-team">${sv === 'OVER' ? 'Over' : 'Under'}</div>`;
+      btn.onclick = () => {
+        chosenSide = sv;
+        sideGrid.querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        createBtn2.disabled = false;
+      };
+      sideGrid.appendChild(btn);
+    });
+    section.appendChild(sideGrid);
+
+    const slip = el('div', 'bet-slip');
+    const bsRow = el('div', 'bs-row');
+    bsRow.appendChild(el('label', null, 'Units'));
+    const unitsInput2 = el('input'); unitsInput2.type = 'number'; unitsInput2.min = '0.5'; unitsInput2.step = '0.5'; unitsInput2.value = '1';
+    bsRow.appendChild(unitsInput2);
+    slip.appendChild(bsRow);
+
+    const visSel2 = el('select');
+    visSel2.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin:8px 0;box-sizing:border-box;';
+    const publicOpt2 = document.createElement('option'); publicOpt2.value = ''; publicOpt2.textContent = '\ud83d\udce2 Post publicly'; visSel2.appendChild(publicOpt2);
+    players.filter(p => p !== profile.name).forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = '\ud83d\udc64 Send to ' + p; visSel2.appendChild(o); });
+    slip.appendChild(visSel2);
+
+    const createBtn2 = el('button', 'lock-btn', 'Select Over or Under');
+    createBtn2.disabled = true;
+    slip.appendChild(createBtn2);
+    const errEl2 = el('div', 'pick-error');
+    slip.appendChild(errEl2);
+    section.appendChild(slip);
+    section.appendChild(el('div', 'setup-hint', "Player props are new — stat lookups happen automatically once the game is final, but double-check the result once it settles."));
+
+    createBtn2.onclick = async () => {
+      const playerName = nameInput.value.trim();
+      const line = parseFloat(lineInput.value);
+      const units = parseFloat(unitsInput2.value);
+      errEl2.textContent = '';
+      if (!playerName) { errEl2.textContent = "Enter the player's name."; return; }
+      if (isNaN(line)) { errEl2.textContent = 'Enter a line.'; return; }
+      if (!chosenSide) { errEl2.textContent = 'Pick Over or Under.'; return; }
+      if (!units || units <= 0) { errEl2.textContent = 'Enter a valid unit amount.'; return; }
+      const displaySide = chosenSide === 'OVER' ? 'UNDER' : 'OVER';
+      const friend = visSel2.value || null;
+      const challenge = {
+        id: profile.name + '_challenge_' + g.id + '_playerprop_' + Date.now(),
+        poolType: 'challenge', propType: 'player', creator: profile.name,
+        sport, gameId: g.id, gameLabel: g.away + ' @ ' + g.home,
+        playerName, statCategory: catSel.value, sideAbbr: displaySide, line, units,
+        visibility: friend ? 'friend' : 'public',
+        targetFriend: friend, status: 'open', acceptedBy: null,
+        timestamp: new Date().toISOString()
+      };
+      createBtn2.disabled = true; createBtn2.textContent = 'Saving…';
+      allPicks.push(challenge);
+      try {
+        await savePicks(allPicks);
+        render();
+      } catch (e) {
+        allPicks.pop();
+        createBtn2.disabled = false; createBtn2.textContent = friend ? 'Send to ' + friend : 'Post publicly';
+        errEl2.textContent = "Couldn't save (" + describeFetchError(e) + ") — try again.";
+      }
+    };
+    visSel2.onchange = () => { createBtn2.textContent = visSel2.value ? 'Send to ' + visSel2.value : 'Post publicly'; };
+    card.appendChild(section);
+  }
+
   return card;
 }
 
@@ -2651,6 +2750,7 @@ function parseSpreadLabel(label) {
 }
 function settlePick(p) {
   if (p.settledResult) return p.settledResult;
+  if (p.propType === 'player') return { status: 'pending' }; // resolved by persistNewlySettledPlayerProps
   const idx = gameIndex[p.gameId];
   if (!idx) return { status: 'pending' };
   const g = idx.game;
@@ -2693,6 +2793,94 @@ async function persistNewlySettledPicks() {
   return changed;
 }
 function potentialWin(p) { return p.units; }
+
+// ---------- Player props: box score fetch + async settlement ----------
+// NOTE: built from ESPN's commonly-documented summary?event= box score shape (boxscore.players[].statistics[].athletes[]),
+// but not verified against a live response in this session — test after deploying and report back if stats don't match.
+const PLAYER_PROP_CATEGORIES = [
+  { id: 'passingYards', label: 'Passing Yards' },
+  { id: 'rushingYards', label: 'Rushing Yards' },
+  { id: 'receptions', label: 'Receptions' },
+  { id: 'receivingYards', label: 'Receiving Yards' },
+  { id: 'touchdowns', label: 'Touchdowns (Any)' },
+];
+let boxScoreCache = {}; // gameId -> {normalizedName: {displayName, passingYards, rushingYards, receptions, receivingYards, passingTouchdowns, rushingTouchdowns, receivingTouchdowns}} | null
+async function fetchPlayerBoxScore(sport, gameId) {
+  if (boxScoreCache[gameId] !== undefined) return boxScoreCache[gameId];
+  const paths = ESPN_PATHS[sport];
+  if (!paths) { boxScoreCache[gameId] = null; return null; }
+  try {
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${paths.sport}/${paths.league}/summary?event=${gameId}`);
+    if (!res.ok) { boxScoreCache[gameId] = null; return null; }
+    const json = await res.json();
+    const players = {};
+    const teamsArr = (json.boxscore && json.boxscore.players) || [];
+    teamsArr.forEach(teamBlock => {
+      (teamBlock.statistics || []).forEach(cat => {
+        const keys = cat.keys || cat.labels || [];
+        (cat.athletes || []).forEach(a => {
+          const name = a.athlete && a.athlete.displayName;
+          if (!name) return;
+          const norm = name.toLowerCase().trim();
+          if (!players[norm]) players[norm] = { displayName: name, passingYards: null, rushingYards: null, receptions: null, receivingYards: null, passingTouchdowns: null, rushingTouchdowns: null, receivingTouchdowns: null };
+          const statVals = a.stats || [];
+          keys.forEach((k, i) => {
+            const kl = (k || '').toLowerCase().replace(/[^a-z]/g, '');
+            const raw = statVals[i];
+            const v = parseFloat(raw);
+            if (raw === undefined || isNaN(v)) return;
+            if (kl.includes('passingyards')) players[norm].passingYards = v;
+            else if (kl.includes('rushingyards')) players[norm].rushingYards = v;
+            else if (kl === 'receptions') players[norm].receptions = v;
+            else if (kl.includes('receivingyards')) players[norm].receivingYards = v;
+            else if (kl.includes('passingtouchdowns')) players[norm].passingTouchdowns = v;
+            else if (kl.includes('rushingtouchdowns')) players[norm].rushingTouchdowns = v;
+            else if (kl.includes('receivingtouchdowns')) players[norm].receivingTouchdowns = v;
+          });
+        });
+      });
+    });
+    boxScoreCache[gameId] = players;
+    return players;
+  } catch (e) { boxScoreCache[gameId] = null; return null; }
+}
+function statValueFor(playerStats, category) {
+  if (!playerStats) return null;
+  if (category === 'touchdowns') {
+    const parts = [playerStats.passingTouchdowns, playerStats.rushingTouchdowns, playerStats.receivingTouchdowns];
+    if (parts.every(x => x === null)) return null;
+    return parts.reduce((s,x) => s + (x || 0), 0);
+  }
+  return playerStats[category];
+}
+function findPlayerInBoxScore(box, typedName) {
+  const norm = typedName.toLowerCase().trim();
+  if (box[norm]) return box[norm];
+  const match = Object.values(box).find(x => x.displayName.toLowerCase() === norm);
+  if (match) return match;
+  return Object.values(box).find(x => x.displayName.toLowerCase().includes(norm) || norm.includes(x.displayName.toLowerCase()));
+}
+async function persistNewlySettledPlayerProps() {
+  let changed = false;
+  const toCheck = allPicks.filter(p => p.poolType === 'challenge' && p.propType === 'player' && !p.settledResult && (p.status === 'open' || p.status === 'accepted'));
+  for (const p of toCheck) {
+    const idx = gameIndex[p.gameId];
+    if (!idx || (idx.game.status !== 'closed' && idx.game.status !== 'complete')) continue;
+    const box = await fetchPlayerBoxScore(p.sport, p.gameId);
+    if (!box) continue; // fetch failed, retry next cycle
+    const stats = findPlayerInBoxScore(box, p.playerName);
+    if (!stats) { if (!p.playerNotFound) { p.playerNotFound = true; changed = true; } continue; }
+    const val = statValueFor(stats, p.statCategory);
+    if (val === null) { if (!p.playerNotFound) { p.playerNotFound = true; changed = true; } continue; }
+    const diff = val - p.line;
+    const outcome = diff === 0 ? 'push' : (p.sideAbbr === 'OVER' ? (diff > 0 ? 'win' : 'loss') : (diff < 0 ? 'win' : 'loss'));
+    p.settledResult = outcome === 'push' ? { status: 'push' } : { status: outcome, profit: outcome === 'win' ? p.units : -p.units };
+    p.actualStatValue = val;
+    changed = true;
+  }
+  if (changed) { try { await savePicks(allPicks); } catch (e) { /* best-effort; retry next cycle */ } }
+  return changed;
+}
 
 function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan' && p.poolType !== 'swipeSkip' && p.poolType !== 'swipeCartItem'); }
 async function migrateLegacyWeeklyPicks() {
