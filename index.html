@@ -2423,12 +2423,14 @@ function renderSwipeCard(ch) {
   return cardWrap;
 }
 
-function renderSwipeMode() {
+function renderSwipeMode(extraRows) {
   document.body.classList.add('no-scroll');
   const wrap = el('div');
   const headerEl = document.querySelector('header.top');
   const headerHeight = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 110;
   wrap.style.cssText = `position:fixed;top:${headerHeight}px;left:0;right:0;bottom:76px;display:flex;flex-direction:column;padding:0 16px 10px;box-sizing:border-box;overflow:hidden;`;
+
+  (extraRows || []).forEach(row => { if (row) { row.style.flexShrink = '0'; wrap.appendChild(row); } });
 
   const header = el('div');
   header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 0;flex-shrink:0;';
@@ -2525,14 +2527,12 @@ function renderSwipeCart() {
 }
 
 function renderExistingChallenges() {
-  const wrap = el('div');
   const toggle = el('div', 'league-scroller');
   [['global','Global'],['friends','Friends'],['mine','Mine']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (existingChallengeView === id ? ' active' : ''), label);
     pill.onclick = () => { existingChallengeView = id; challengeBrowseMode = 'swipe'; swipeStackInitialized = false; openChallengeLeague = null; render(); };
     toggle.appendChild(pill);
   });
-  wrap.appendChild(toggle);
 
   const all = allPicks.filter(p => p.poolType === 'challenge');
   const stillActive = ch => ch.status === 'open' || (ch.status === 'accepted' && settlePick(ch).status === 'pending');
@@ -2545,9 +2545,10 @@ function renderExistingChallenges() {
     byView = all.filter(ch => ch.creator === profile.name && stillActive(ch));
   }
 
+  let leagueScroller = null;
   const leaguesPresent = [...new Set(byView.map(ch => ch.sport).filter(Boolean))];
   if (leaguesPresent.length > 1) {
-    const leagueScroller = el('div', 'league-scroller');
+    leagueScroller = el('div', 'league-scroller');
     const allPill = el('button', 'league-pill' + (openChallengeLeague === null ? ' active' : ''), 'All leagues');
     allPill.onclick = () => { openChallengeLeague = null; swipeStackInitialized = false; render(); };
     leagueScroller.appendChild(allPill);
@@ -2557,7 +2558,6 @@ function renderExistingChallenges() {
       pill.onclick = () => { openChallengeLeague = sport; swipeStackInitialized = false; render(); };
       leagueScroller.appendChild(pill);
     });
-    wrap.appendChild(leagueScroller);
   }
 
   const list = openChallengeLeague === null ? byView : byView.filter(ch => ch.sport === openChallengeLeague);
@@ -2572,10 +2572,19 @@ function renderExistingChallenges() {
       swipeStack = list.filter(ch => ch.creator !== profile.name && ch.acceptedBy !== profile.name && !cartIds.has(ch.id) && !declinedIds.has(ch.id));
       swipeStackInitialized = true;
     }
-    if (challengeBrowseMode === 'cart') { wrap.appendChild(renderSwipeCart()); return wrap; }
-    wrap.appendChild(renderSwipeMode()); return wrap;
+    if (challengeBrowseMode === 'cart') {
+      const wrap = el('div');
+      wrap.appendChild(toggle);
+      if (leagueScroller) wrap.appendChild(leagueScroller);
+      wrap.appendChild(renderSwipeCart());
+      return wrap;
+    }
+    return renderSwipeMode([toggle, leagueScroller]);
   }
 
+  const wrap = el('div');
+  wrap.appendChild(toggle);
+  if (leagueScroller) wrap.appendChild(leagueScroller);
   const headerText = existingChallengeView === 'friends' ? 'Your friend challenges' : 'Bets you\'ve posted';
   wrap.appendChild(el('div', 'week-header', headerText));
   if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
