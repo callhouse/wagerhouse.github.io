@@ -341,6 +341,8 @@ let activeChallengesOpen = true;
 let completedChallengesOpen = true;
 let acceptedChallengeLeague = null; // sport id or null
 let openChallengeLeague = null; // sport id or null
+let openChallengeDateFilter = 'week'; // 'today' | 'week'
+let openChallengeTypeFilter = 'all'; // 'all' | 'spread' | 'total' | 'player' | 'golf'
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -2583,7 +2585,38 @@ function renderExistingChallenges() {
     });
   }
 
-  const list = openChallengeLeague === null ? byView : byView.filter(ch => ch.sport === openChallengeLeague);
+  const dateScroller = el('div', 'league-scroller');
+  [['today','Today'],['week','This Week']].forEach(([id,label]) => {
+    const pill = el('button', 'league-pill' + (openChallengeDateFilter === id ? ' active' : ''), label);
+    pill.onclick = () => { openChallengeDateFilter = id; swipeStackInitialized = false; render(); };
+    dateScroller.appendChild(pill);
+  });
+
+  const typeScroller = el('div', 'league-scroller');
+  [['all','All'],['spread','Spread'],['total','Total'],['player','Player Prop'],['golf','Golf H2H']].forEach(([id,label]) => {
+    const pill = el('button', 'league-pill' + (openChallengeTypeFilter === id ? ' active' : ''), label);
+    pill.onclick = () => { openChallengeTypeFilter = id; swipeStackInitialized = false; render(); };
+    typeScroller.appendChild(pill);
+  });
+
+  const byLeague = openChallengeLeague === null ? byView : byView.filter(ch => ch.sport === openChallengeLeague);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const byDate = byLeague.filter(ch => {
+    const idx = gameIndex[ch.gameId];
+    if (!idx || !idx.game || !idx.game.start) return true; // no resolvable game date (e.g. golf) — don't hide it
+    const gd = new Date(idx.game.start);
+    if (openChallengeDateFilter === 'today') {
+      return gd.getFullYear() === now.getFullYear() && gd.getMonth() === now.getMonth() && gd.getDate() === now.getDate();
+    }
+    const weekEnd = new Date(startOfToday); weekEnd.setDate(weekEnd.getDate() + 7);
+    return gd >= startOfToday && gd < weekEnd;
+  });
+  const list = openChallengeTypeFilter === 'all' ? byDate : byDate.filter(ch => {
+    if (openChallengeTypeFilter === 'player') return ch.propType === 'player';
+    if (openChallengeTypeFilter === 'golf') return ch.propType === 'golf_h2h';
+    return !ch.propType && ch.betType === openChallengeTypeFilter;
+  });
   list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   if (existingChallengeView === 'global') {
@@ -2598,12 +2631,14 @@ function renderExistingChallenges() {
     if (challengeBrowseMode === 'cart') {
       return renderSwipeCart();
     }
-    return renderSwipeMode([toggle, leagueScroller]);
+    return renderSwipeMode([toggle, leagueScroller, dateScroller, typeScroller]);
   }
 
   const wrap = el('div');
   wrap.appendChild(toggle);
   if (leagueScroller) wrap.appendChild(leagueScroller);
+  wrap.appendChild(dateScroller);
+  wrap.appendChild(typeScroller);
   const headerText = existingChallengeView === 'friends' ? 'Your friend challenges' : 'Bets you\'ve posted';
   wrap.appendChild(el('div', 'week-header', headerText));
   if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
