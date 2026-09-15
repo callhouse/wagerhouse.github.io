@@ -1008,7 +1008,7 @@ function renderDailyChallenge() {
     const usedMulligan = !!mulliganFor(profile.name, wk);
     options.forEach(opt => wrap.appendChild(renderDailyOptionCard(opt, remaining, options, usedMulligan)));
   }
-  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts, and reset fresh to ${HOUSE_BANK_TOTAL} every day.`));
+  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts. Units reset every day.`));
   return wrap;
 }
 
@@ -1627,6 +1627,8 @@ function challengeStatusText(ch) {
 
 function renderChallengeRow(ch) {
   const card = el('div', 'event-card');
+  if (ch.status === 'accepted') card.style.borderColor = '#4CAF50';
+  else if (ch.status === 'open') card.style.borderColor = 'var(--text-faint)';
   const top = el('div');
   top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
   top.innerHTML = `<span style="font-size:11px;color:var(--text-faint);">${ch.visibility === 'public' ? '\ud83d\udce2 Global' : '\ud83d\udc64 Friend'}</span><span style="font-size:11px;color:var(--text-faint);">${new Date(ch.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`;
@@ -1761,7 +1763,7 @@ function renderSwipeCard(ch) {
   const btnRow = el('div'); btnRow.style.cssText = 'display:flex;gap:10px;';
   const declineBtn = el('button', null, '\u2715 Decline');
   declineBtn.style.cssText = 'flex:1;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:8px;padding:13px;font-weight:700;font-size:14px;';
-  const acceptBtn = el('button', null, '\u2713 Accept');
+  const acceptBtn = el('button', null, '\u2713 Add to cart');
   acceptBtn.style.cssText = 'flex:1;background:var(--accent-dark);border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:13px;font-weight:700;font-size:14px;';
   btnRow.appendChild(declineBtn); btnRow.appendChild(acceptBtn);
   cardWrap.appendChild(btnRow);
@@ -1870,7 +1872,7 @@ function renderSwipeCart() {
 function renderExistingChallenges() {
   const wrap = el('div');
   const toggle = el('div', 'league-scroller');
-  [['global','Global'],['friends','Friends']].forEach(([id,label]) => {
+  [['global','Global'],['friends','Friends'],['mine','Mine']].forEach(([id,label]) => {
     const pill = el('button', 'league-pill' + (existingChallengeView === id ? ' active' : ''), label);
     pill.onclick = () => { existingChallengeView = id; challengeBrowseMode = 'swipe'; swipeStackInitialized = false; render(); };
     toggle.appendChild(pill);
@@ -1882,8 +1884,10 @@ function renderExistingChallenges() {
   let list;
   if (existingChallengeView === 'global') {
     list = all.filter(ch => ch.visibility === 'public' && stillActive(ch));
-  } else {
+  } else if (existingChallengeView === 'friends') {
     list = all.filter(ch => ch.visibility === 'friend' && (ch.creator === profile.name || ch.targetFriend === profile.name) && stillActive(ch));
+  } else {
+    list = all.filter(ch => ch.creator === profile.name && stillActive(ch));
   }
   list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -1897,7 +1901,8 @@ function renderExistingChallenges() {
     wrap.appendChild(renderSwipeMode()); return wrap;
   }
 
-  wrap.appendChild(el('div', 'week-header', existingChallengeView === 'global' ? 'Open global challenges' : 'Your friend challenges'));
+  const headerText = existingChallengeView === 'friends' ? 'Your friend challenges' : 'Bets you\'ve posted';
+  wrap.appendChild(el('div', 'week-header', headerText));
   if (!list.length) { wrap.appendChild(el('div', 'empty', 'Nothing here right now.')); return wrap; }
   list.forEach(ch => wrap.appendChild(renderChallengeRow(ch)));
   return wrap;
