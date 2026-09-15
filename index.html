@@ -485,7 +485,7 @@ function renderSectionSwitch() {
   const bar = document.getElementById('sectionSwitch');
   bar.innerHTML = '';
   if (!profile) return;
-  [['daily','House Bet'],['pools','Challenge'],['kalshi','3rd Party Bets']].forEach(([id,label]) => {
+  [['daily','House Bet'],['pools','Challenge'],['kalshi','3rd Party']].forEach(([id,label]) => {
     const t = el('div', 'tab' + (appSection === id ? ' active' : ''), label);
     t.onclick = () => { appSection = id; render(); };
     bar.appendChild(t);
@@ -558,9 +558,7 @@ function houseWeekStart(d) {
 }
 function houseWeekKey(d) { return houseWeekStart(d).toISOString().slice(0,10); }
 function weekRangeLabel(wk) {
-  const start = new Date(wk + 'T00:00:00');
-  const end = new Date(start); end.setDate(end.getDate() + 6);
-  return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '–' + end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(wk + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 function chipsFor(units) {
   return '\ud83d\udd25'.repeat(Math.max(0, Math.min(3, Math.round(units))));
@@ -576,12 +574,11 @@ function seededRandom(seedStr) {
     return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
   };
 }
-let cachedDailyOptions = null;
-let cachedDailyOptionsKey = null;
-function dailyRandomOptions() {
+let cachedDailyPool = null;
+let cachedDailyPoolKey = null;
+function dailyOptionPool() {
   const dayKey = houseDayKey(new Date());
-  if (cachedDailyOptionsKey === dayKey && cachedDailyOptions) return cachedDailyOptions;
-
+  if (cachedDailyPoolKey === dayKey && cachedDailyPool) return cachedDailyPool;
   const rand = seededRandom(dayKey);
   const pool = [];
   LEAGUES_META.filter(l => l.active).forEach(lg => {
@@ -592,24 +589,50 @@ function dailyRandomOptions() {
       if (spreadVal !== null) {
         const side = rand() < 0.5 ? g.home : g.away;
         const line = side === g.home ? spreadVal : -spreadVal;
-        pool.push({ sport: lg.id, gameId: g.id, betType: 'spread', side, line, label: `${side} ${line === 0 ? 'PK' : (line > 0 ? '+' + line : line)}` });
+        pool.push({ sport: lg.id, gameId: g.id, betType: 'spread', side, line, label: `${side} ${line === 0 ? 'PK' : (line > 0 ? '+' + line : line)}`, gameLabel: g.away + ' @ ' + g.home });
       }
       const totalVal = g.overUnder;
       if (totalVal !== null && totalVal !== undefined) {
         const side = rand() < 0.5 ? 'OVER' : 'UNDER';
-        pool.push({ sport: lg.id, gameId: g.id, betType: 'total', side, line: totalVal, label: `${side === 'OVER' ? 'Over' : 'Under'} ${totalVal}` });
+        pool.push({ sport: lg.id, gameId: g.id, betType: 'total', side, line: totalVal, label: `${side === 'OVER' ? 'Over' : 'Under'} ${totalVal}`, gameLabel: g.away + ' @ ' + g.home });
       }
     });
   });
-
-  if (pool.length < 10) { cachedDailyOptions = null; cachedDailyOptionsKey = dayKey; return null; }
-  for (let i = pool.length - 1; i > 0; i--) {
+  cachedDailyPool = pool;
+  cachedDailyPoolKey = dayKey;
+  return pool;
+}
+let cachedDailySlate = null;
+let cachedDailySlateKey = null;
+function dailyBaseSlate() {
+  const dayKey = houseDayKey(new Date());
+  if (cachedDailySlateKey === dayKey) return cachedDailySlate;
+  const pool = dailyOptionPool();
+  if (pool.length < 5) { cachedDailySlate = null; cachedDailySlateKey = dayKey; return null; }
+  const rand = seededRandom(dayKey + '_slate');
+  const shuffled = pool.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  cachedDailyOptions = pool.slice(0, 10);
-  cachedDailyOptionsKey = dayKey;
-  return cachedDailyOptions;
+  cachedDailySlate = shuffled.slice(0, 5);
+  cachedDailySlateKey = dayKey;
+  return cachedDailySlate;
+}
+function mulliganFor(name, dayKey) {
+  return allPicks.find(p => p.poolType === 'mulligan' && p.player === name && p.dayKey === dayKey);
+}
+function dailyOptionsForUser(name) {
+  const base = dailyBaseSlate();
+  if (!base) return null;
+  const dayKey = houseDayKey(new Date());
+  const mull = mulliganFor(name, dayKey);
+  if (!mull) return base;
+  const idx = base.findIndex(o => o.gameId === mull.replacedGameId && o.betType === mull.replacedBetType);
+  if (idx === -1) return base;
+  const copy = base.slice();
+  copy[idx] = mull.newOption;
+  return copy;
 }
 function weeklyBetsFor(name, wk) {
   return allPicks.filter(p => p.player === name && p.poolType === 'weekly' && p.weekKey === wk);
@@ -734,7 +757,7 @@ function renderWeeklyBetsBar(bets) {
   return wrap;
 }
 
-function renderDailyOptionCard(opt, remaining) {
+function renderDailyOptionCard(opt, remaining, fullSlate, usedMulligan) {
   const idx = gameIndex[opt.gameId];
   if (!idx) return el('div');
   const game = idx.game;
@@ -748,7 +771,7 @@ function renderDailyOptionCard(opt, remaining) {
   }
   card.appendChild(el('div', null, `Pick: ${opt.label}`)).style.cssText = 'font-size:15px;font-weight:800;color:var(--accent);margin-bottom:10px;';
 
-  const wk = houseWeekKey(new Date());
+  const wk = houseDayKey(new Date());
   const existingBet = weeklyBetsFor(profile.name, wk).find(p => p.gameId === opt.gameId && p.betType === opt.betType);
 
   if (existingBet) {
@@ -771,6 +794,45 @@ function renderDailyOptionCard(opt, remaining) {
     return card;
   }
   if (remaining <= 0) { card.appendChild(el('div', 'no-odds-note', 'Bank empty this week')); return card; }
+
+  if (!usedMulligan) {
+    const mullWrap = el('div');
+    mullWrap.style.cssText = 'margin-bottom:10px;';
+    const mullToggleBtn = el('button', null, '\ud83d\udd04 Swap this pick (mulligan)');
+    mullToggleBtn.style.cssText = 'width:100%;background:none;border:1px dashed var(--border);color:var(--text-dim);border-radius:6px;padding:9px;font-size:12px;font-weight:700;';
+    const swapPanel = el('div');
+    swapPanel.style.cssText = 'display:none;margin-top:8px;';
+    const alreadyUsedKeys = new Set(fullSlate.map(o => o.gameId + '_' + o.betType));
+    const alternatives = dailyOptionPool().filter(o => !alreadyUsedKeys.has(o.gameId + '_' + o.betType));
+    const altSel = el('select');
+    altSel.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:9px;font-size:13px;margin-bottom:8px;box-sizing:border-box;';
+    if (!alternatives.length) {
+      swapPanel.appendChild(el('div', 'no-odds-note', 'No other options available to swap in today.'));
+    } else {
+      alternatives.forEach((o,i) => { const op = document.createElement('option'); op.value = String(i); op.textContent = `${o.gameLabel} — ${o.label}`; altSel.appendChild(op); });
+      swapPanel.appendChild(altSel);
+      const confirmBtn = el('button', 'lock-btn', 'Confirm swap');
+      confirmBtn.onclick = async () => {
+        const chosen = alternatives[parseInt(altSel.value, 10)];
+        const mullRecord = {
+          id: profile.name + '_mulligan_' + wk,
+          poolType: 'mulligan', player: profile.name, dayKey: wk,
+          replacedGameId: opt.gameId, replacedBetType: opt.betType,
+          newOption: chosen,
+          timestamp: new Date().toISOString()
+        };
+        confirmBtn.disabled = true; confirmBtn.textContent = 'Saving…';
+        allPicks.push(mullRecord);
+        try { await savePicks(allPicks); render(); }
+        catch (e) { allPicks.pop(); confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm swap'; alert("Couldn't save (" + describeFetchError(e) + ") — try again."); }
+      };
+      swapPanel.appendChild(confirmBtn);
+    }
+    mullToggleBtn.onclick = () => { swapPanel.style.display = swapPanel.style.display === 'none' ? 'block' : 'none'; };
+    mullWrap.appendChild(mullToggleBtn);
+    mullWrap.appendChild(swapPanel);
+    card.appendChild(mullWrap);
+  }
 
   const key = opt.gameId + '_' + opt.betType;
   const slip = el('div', 'bet-slip');
@@ -850,10 +912,10 @@ function renderWeekFinalRecap(name, wk) {
   const rank = board.findIndex(r => r.name === name) + 1;
   const totalBefore = totalUnitsWon(name) - net;
   const totalAfter = totalBefore + net;
-  card.innerHTML = `<div class="event-meta">Week final — ${weekRangeLabel(wk)}</div>
+  card.innerHTML = `<div class="event-meta">Day final — ${weekRangeLabel(wk)}</div>
     <div style="text-align:center;margin:14px 0;">
       <div style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:${net >= 0 ? 'var(--accent)' : 'var(--danger)'};">${fmtUnits(net)}</div>
-      <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Rank #${rank} of ${board.length} this week</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Rank #${rank} of ${board.length} today</div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
       <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;">Units won</div>
@@ -866,7 +928,7 @@ function renderWeekFinalRecap(name, wk) {
 function renderHouseWeekHistory() {
   const wrap = el('div');
   const wks = allWeekKeysFor(profile.name).slice().reverse();
-  if (!wks.length) { wrap.appendChild(el('div', 'empty', 'No completed weeks yet.')); return wrap; }
+  if (!wks.length) { wrap.appendChild(el('div', 'empty', 'No completed days yet.')); return wrap; }
   wks.forEach(wk => {
     const bets = weeklyBetsFor(profile.name, wk);
     const net = weeklyNetUnits(profile.name, wk);
@@ -884,7 +946,7 @@ function renderHouseWeekHistory() {
 
 function renderDailyChallenge() {
   const wrap = el('div');
-  const wk = houseWeekKey(new Date());
+  const wk = houseDayKey(new Date());
   const remaining = weeklyRemaining(profile.name, wk);
   const myBets = weeklyBetsFor(profile.name, wk);
   const unitsWon = totalUnitsWon(profile.name);
@@ -894,7 +956,7 @@ function renderDailyChallenge() {
   const b1 = el('div', 'rank-cell');
   b1.appendChild(el('div', 'rc-label', 'House bet'));
   b1.appendChild(el('div', 'rc-value accent', remaining + ' / ' + HOUSE_BANK_TOTAL + 'u'));
-  b1.appendChild(el('div', 'rc-sub', 'Resets Monday'));
+  b1.appendChild(el('div', 'rc-sub', 'Resets daily'));
   banner.appendChild(b1);
   const b2 = el('div', 'rank-cell');
   b2.appendChild(el('div', 'rc-label', 'Units won'));
@@ -903,12 +965,12 @@ function renderDailyChallenge() {
   banner.appendChild(b2);
   const b3 = el('div', 'rank-cell');
   b3.appendChild(el('div', 'rc-label', 'Positive streak'));
-  b3.appendChild(el('div', 'rc-value ' + (streak > 0 ? 'accent' : ''), streak + (streak === 1 ? ' week' : ' weeks')));
-  b3.appendChild(el('div', 'rc-sub', 'Weeks in a row up'));
+  b3.appendChild(el('div', 'rc-value ' + (streak > 0 ? 'accent' : ''), streak + (streak === 1 ? ' day' : ' days')));
+  b3.appendChild(el('div', 'rc-sub', 'Days in a row up'));
   banner.appendChild(b3);
   wrap.appendChild(banner);
 
-  const historyToggle = el('button', null, dailyShowHistory ? '← Back to this week' : 'Past weeks');
+  const historyToggle = el('button', null, dailyShowHistory ? '← Back to today' : 'Past days');
   historyToggle.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:700;padding:8px 12px;border-radius:6px;margin:10px 0 4px;';
   historyToggle.onclick = () => { dailyShowHistory = !dailyShowHistory; render(); };
   wrap.appendChild(historyToggle);
@@ -919,26 +981,27 @@ function renderDailyChallenge() {
   }
 
   if (myBets.length === 0) {
-    const prevWeeks = allWeekKeysFor(profile.name).filter(w => w < wk);
-    const lastWeek = prevWeeks.length ? prevWeeks[prevWeeks.length - 1] : null;
-    if (lastWeek && weeklyAllSettled(profile.name, lastWeek)) {
-      wrap.appendChild(renderWeekFinalRecap(profile.name, lastWeek));
+    const prevDays = allWeekKeysFor(profile.name).filter(w => w < wk);
+    const lastDay = prevDays.length ? prevDays[prevDays.length - 1] : null;
+    if (lastDay && weeklyAllSettled(profile.name, lastDay)) {
+      wrap.appendChild(renderWeekFinalRecap(profile.name, lastDay));
     }
   }
 
   if (myBets.length) {
-    wrap.appendChild(el('div', 'week-header', 'This week (tap to expand)'));
+    wrap.appendChild(el('div', 'week-header', "Today's bets (tap to expand)"));
     wrap.appendChild(renderWeeklyBetsBar(myBets));
   }
 
-  const options = dailyRandomOptions();
+  const options = dailyOptionsForUser(profile.name);
   wrap.appendChild(el('div', 'week-header', "Today's picks"));
   if (!options) {
-    wrap.appendChild(el('div', 'empty', "Not enough games with posted lines today for a full slate of 10 — check back tomorrow."));
+    wrap.appendChild(el('div', 'empty', "Not enough games with posted lines today for a full slate of 5 — check back tomorrow."));
   } else {
-    options.forEach(opt => wrap.appendChild(renderDailyOptionCard(opt, remaining)));
+    const usedMulligan = !!mulliganFor(profile.name, wk);
+    options.forEach(opt => wrap.appendChild(renderDailyOptionCard(opt, remaining, options, usedMulligan)));
   }
-  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a week, spread across a random daily slate of 10 picks. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts; whatever's left carries you through the rest of the week.`));
+  wrap.appendChild(el('div', 'refresh-note', `${HOUSE_BANK_TOTAL} house units a day, spread across a random daily slate of 5 picks — one mulligan a day to swap a pick you don't like. Up to ${HOUSE_BET_CAP}u (${HOUSE_BET_CAP} confidence points) on any one pick. Units lock once a game starts; whatever's left carries you through the rest of the day.`));
   return wrap;
 }
 
@@ -1851,7 +1914,7 @@ async function persistNewlySettledPicks() {
 }
 function potentialWin(p) { return p.units; }
 
-function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge'); }
+function poolOnly(list) { return list.filter(p => p.poolType !== 'daily' && p.poolType !== 'weekly' && p.poolType !== 'tracker' && p.poolType !== 'kalshi' && p.poolType !== 'challenge' && p.poolType !== 'mulligan'); }
 async function migrateLegacyWeeklyPicks() {
   let changed = false;
   allPicks.forEach(p => {
@@ -1883,7 +1946,7 @@ function rankAmong(valueForName) {
   return { rank: idx + 1, total: arr.length };
 }
 
-function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker') return false; return !gameIndex[p.gameId]; }
+function isOrphaned(p) { if (p.poolType === 'kalshi' || p.poolType === 'tracker' || p.poolType === 'mulligan') return false; return !gameIndex[p.gameId]; }
 
 async function deletePick(pickId) {
   const idx = allPicks.findIndex(p => p.id === pickId);
