@@ -364,6 +364,9 @@ let minimizedGameCards = {};
 let commentSectionOpen = {};
 let commentVisibilityFilter = 'all'; // 'all' | 'public' | 'friends'
 let poolBuilderOpen = false;
+let poolsYourOpen = true;
+let poolsOpenOpen = true;
+let dailyHousePoolExpanded = false;
 let poolBuilderLegs = []; // [{sport, gameId, gameLabel, betType, sideAbbr, line, spreadLabel, displayText}]
 let openChallengeMaxUnits = null; // null = no cap
 let challengeTypeSelection = {}; // gameId -> 'spread' | 'total' | 'playerprop'
@@ -765,7 +768,7 @@ function renderInner() {
     main.appendChild(renderFriendsScreen());
   } else if (appSection === 'daily') {
     document.getElementById('tabbar').innerHTML = '';
-    main.appendChild(renderDailyChallenge());
+    main.appendChild(renderPoolsSection());
   } else if (appSection === 'kalshi') {
     document.getElementById('tabbar').innerHTML = '';
     main.appendChild(renderKalshiSection());
@@ -1824,6 +1827,51 @@ function renderHouseWeekHistory() {
   return wrap;
 }
 
+function renderPoolsSection() {
+  const wrap = el('div');
+
+  const poolToggleBtn = el('button', null, poolBuilderOpen ? '\u2212 Close Pool Builder' : '+ Build a Pool');
+  poolToggleBtn.style.cssText = 'width:100%;margin-bottom:10px;background:none;border:1px dashed var(--accent);color:var(--accent);border-radius:8px;padding:10px;font-size:12.5px;font-weight:700;';
+  poolToggleBtn.onclick = () => { poolBuilderOpen = !poolBuilderOpen; render(); };
+  wrap.appendChild(poolToggleBtn);
+  if (poolBuilderOpen) { wrap.appendChild(renderPoolBuilder()); return wrap; }
+
+  const allPools = allPicks.filter(p => p.poolType === 'challenge' && p.propType === 'combo_pool');
+  const yourPools = allPools.filter(p => p.creator === profile.name);
+  const openPools = allPools.filter(p => p.status === 'open' && p.creator !== profile.name && (
+    p.visibility === 'public' || (p.visibility === 'friend' && p.targetFriend === profile.name)
+  ));
+
+  const yourHeader = el('div', 'week-header', `${poolsYourOpen ? '\u25be' : '\u25b8'} Your Pools (${yourPools.length})`);
+  yourHeader.style.cursor = 'pointer';
+  yourHeader.onclick = () => { poolsYourOpen = !poolsYourOpen; render(); };
+  wrap.appendChild(yourHeader);
+  if (poolsYourOpen) {
+    if (!yourPools.length) { wrap.appendChild(el('div', 'empty', "You haven't built any pools yet.")); }
+    else { yourPools.slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(p => wrap.appendChild(renderChallengeRow(p))); }
+  }
+
+  const openHeader = el('div', 'week-header', `${poolsOpenOpen ? '\u25be' : '\u25b8'} Open Pools (${openPools.length + 1})`);
+  openHeader.style.cursor = 'pointer';
+  openHeader.onclick = () => { poolsOpenOpen = !poolsOpenOpen; render(); };
+  wrap.appendChild(openHeader);
+  if (poolsOpenOpen) {
+    const dhpRow = el('div', 'event-card');
+    dhpRow.style.cssText = 'cursor:pointer;display:flex;justify-content:space-between;align-items:center;';
+    dhpRow.innerHTML = `<div><div style="font-weight:800;font-size:13.5px;">\ud83c\udfe0 Daily House Pool</div><div style="font-size:11px;color:var(--text-faint);margin-top:2px;">5 random picks, resets every day \u2014 same for everyone</div></div><div style="font-size:16px;color:var(--text-faint);">${dailyHousePoolExpanded ? '\u25be' : '\u25b8'}</div>`;
+    dhpRow.onclick = () => { dailyHousePoolExpanded = !dailyHousePoolExpanded; render(); };
+    wrap.appendChild(dhpRow);
+    if (dailyHousePoolExpanded) {
+      const inner = el('div'); inner.style.cssText = 'margin-top:8px;';
+      inner.appendChild(renderDailyChallenge());
+      wrap.appendChild(inner);
+    }
+    if (openPools.length) {
+      openPools.slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(p => wrap.appendChild(renderChallengeRow(p)));
+    }
+  }
+  return wrap;
+}
 function renderDailyChallenge() {
   const wrap = el('div');
   const wk = houseDayKey(new Date());
@@ -2690,11 +2738,6 @@ function renderGames() {
     warn.innerHTML = '\u26a0\ufe0f You need to set a unit size in Profile before you can create or accept challenges.';
     wrap.appendChild(warn);
   }
-  const poolToggleBtn = el('button', null, poolBuilderOpen ? '\u2212 Close Pool Builder' : '+ Build a Pool (combine multiple picks)');
-  poolToggleBtn.style.cssText = 'width:100%;margin-bottom:10px;background:none;border:1px dashed var(--accent);color:var(--accent);border-radius:8px;padding:10px;font-size:12.5px;font-weight:700;';
-  poolToggleBtn.onclick = () => { poolBuilderOpen = !poolBuilderOpen; render(); };
-  wrap.appendChild(poolToggleBtn);
-  if (poolBuilderOpen) { wrap.appendChild(renderPoolBuilder()); return wrap; }
 
   const scroller = el('div', 'league-scroller');
   const orderedLeagues = LEAGUES_META.slice().sort((a, b) => (a.active === b.active) ? 0 : (a.active ? -1 : 1));
